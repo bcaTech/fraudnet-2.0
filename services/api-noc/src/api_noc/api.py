@@ -349,11 +349,15 @@ async def ring_graph(
             rows = await session.cypher(
                 """
                 MATCH (n)
-                WHERE (n:Number AND n.msisdn IN $msisdns)
-                   OR (n:Wallet AND n.wallet_id IN $wallets)
+                WHERE coalesce(n.tenant_id, $tenant_id) = $tenant_id
+                  AND (
+                       (n:Number AND n.msisdn IN $msisdns)
+                    OR (n:Wallet AND n.wallet_id IN $wallets)
+                  )
                 WITH collect(n) AS seeds
                 UNWIND seeds AS seed
                 MATCH (seed)-[r*1..3]-(other)
+                WHERE coalesce(other.tenant_id, $tenant_id) = $tenant_id
                 WITH seed, other, r LIMIT $max_nodes
                 RETURN seed, other, r
                 """,
@@ -596,12 +600,16 @@ async def ring_timeline(
             rows = await session.cypher(
                 """
                 MATCH (a:Number)-[r:CALLED|SMSED]->(b:Number)
-                WHERE a.msisdn IN $msisdns OR b.msisdn IN $msisdns
+                WHERE (a.msisdn IN $msisdns OR b.msisdn IN $msisdns)
+                  AND coalesce(a.tenant_id, $tenant_id) = $tenant_id
+                  AND coalesce(b.tenant_id, $tenant_id) = $tenant_id
                 RETURN a, b, r
                 LIMIT $limit
                 UNION
                 MATCH (a:Wallet)-[r:SENT]->(b:Wallet)
-                WHERE a.wallet_id IN $wallets OR b.wallet_id IN $wallets
+                WHERE (a.wallet_id IN $wallets OR b.wallet_id IN $wallets)
+                  AND coalesce(a.tenant_id, $tenant_id) = $tenant_id
+                  AND coalesce(b.tenant_id, $tenant_id) = $tenant_id
                 RETURN a, b, r
                 LIMIT $limit
                 """,

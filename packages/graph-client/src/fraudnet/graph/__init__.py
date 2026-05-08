@@ -10,11 +10,12 @@ B2B graph queries (Phase 4) are enforced HERE — every query goes through
 """
 
 from fraudnet.graph.batch_writer import BufferedGraphWriter, GraphMutation
-from fraudnet.graph.client import GraphClient, GraphScope
+from fraudnet.graph.client import GraphClient, GraphScope, TenantScopeError
 
 __all__ = [
     "BufferedGraphWriter",
     "GraphClient",
     "GraphMutation",
     "GraphScope",
+    "TenantScopeError",
 ]

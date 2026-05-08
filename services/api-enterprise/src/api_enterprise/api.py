@@ -566,10 +566,9 @@ async def create_tenant(
         async with graph.session(GraphScope(tenant_id=body.slug)) as session:
             await session.cypher(
                 """
-                MERGE (t:Tenant {slug: $slug})
+                MERGE (t:Tenant {slug: $slug, tenant_id: $tenant_id})
                 ON CREATE SET t.created_at = timestamp(),
                               t.federation_enabled = $fed
-                SET t.tenant_id = $slug
                 RETURN t.slug AS slug
                 """,
                 op="provision_tenant",

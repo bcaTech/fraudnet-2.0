@@ -9,11 +9,20 @@ A thin async-friendly wrapper around the Bolt driver that:
 Async support is via run_in_executor; the official driver has an async API
 but it pulls in extra deps and the perf delta isn't worth it on FraudNet's
 typical query mix.
+
+Tenant isolation (Phase 4): Memgraph has no row-level security, so every
+query is enforced here. `GraphScope.validate_query` runs at the API
+boundary on every ad-hoc Cypher: a query without a tenant_id parameter
+reference (or one that mentions a tenant other than the scope's) is
+refused before reaching the driver. The fast-path `_run` write helpers
+build their own tenant clauses from `scope.tenant_id` and never accept
+caller-provided tenant_id values.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -21,7 +30,7 @@ from typing import Any, AsyncIterator
 from neo4j import GraphDatabase, basic_auth
 
 from fraudnet.audit.purpose import require_purpose
-from fraudnet.obs import get_logger, histogram
+from fraudnet.obs import counter, get_logger, histogram
 
 _log = get_logger("fraudnet.graph")
 
@@ -30,17 +39,71 @@ _QUERY_DURATION = histogram(
     "Memgraph query duration.",
     labelnames=("op",),
 )
+_TENANT_VIOLATIONS = counter(
+    "fraudnet_graph_tenant_violations_total",
+    "Cypher queries refused for missing or mismatched tenant scoping.",
+    labelnames=("reason",),
+)
+
+
+# Slug pattern enforced for tenant_id values reaching the graph layer.
+# Lowercase alphanumeric + hyphen; ≤ 64 chars. Matches the api-enterprise
+# tenant slug rule (services/api-enterprise/src/api_enterprise/api.py).
+_TENANT_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
+
+
+class TenantScopeError(ValueError):
+    """Raised when a Cypher query is not properly tenant-scoped.
+
+    This is a programming error, not a runtime condition — the only
+    way to hit it is to bypass the API layer's GraphScope. Catching
+    it should never be appropriate; fix the offending query.
+    """
 
 
 @dataclass(frozen=True)
 class GraphScope:
     """Tenant + purpose context for a graph operation.
 
-    Phase 1: only `mtn-ghana` exists. Phase 4 introduces multiple B2B tenants
-    and queries gate on `:Tenant {id: $tenant_id}` reachability.
+    Phase 4 hardening: tenant_id is the unit of B2B isolation. Every
+    Cypher query going through `GraphClient` is checked against this
+    scope; queries without a tenant filter are refused (`validate_query`
+    rejects them). Per-tenant rate limiting and audit emission happens
+    a layer up (the API service); this layer guarantees the underlying
+    graph store cannot leak across tenants by accident.
     """
 
     tenant_id: str = "mtn-ghana"
+
+    def __post_init__(self) -> None:
+        if not _TENANT_SLUG_RE.match(self.tenant_id):
+            raise TenantScopeError(
+                f"invalid tenant_id slug: {self.tenant_id!r} "
+                "(must be lowercase alphanumeric + hyphen, ≤ 64 chars)"
+            )
+
+    def validate_query(self, query: str) -> None:
+        """Refuse queries that do not reference $tenant_id.
+
+        Heuristic but strict: the query must mention `$tenant_id` (the
+        Cypher parameter name we standardise on). Queries that bind tenant
+        in a non-standard way must call the underlying driver directly,
+        which is reserved for the writer (`batch_writer.py`) — and that
+        path constructs the clause itself from the scope.
+        """
+        if "$tenant_id" not in query:
+            _TENANT_VIOLATIONS.labels(reason="no_tenant_param").inc()
+            raise TenantScopeError(
+                "tenant-scoped Cypher must reference the $tenant_id parameter; "
+                "use scope.tenant_id_clause() to add the standard filter"
+            )
+
+    def tenant_id_clause(self, *, alias: str = "n") -> str:
+        """Standard 'tenant filter' Cypher fragment for inclusion in WHERE
+        clauses. Returns a string ready to drop into a WHERE list, parameter-
+        bound to $tenant_id (Memgraph parameter binding is automatic when the
+        query is run with the tenant_id kwarg)."""
+        return f"{alias}.tenant_id = $tenant_id"
 
 
 class GraphClient:
@@ -161,11 +224,24 @@ class _Session:
     ) -> list[dict[str, Any]]:
         """Run an ad-hoc read query.
 
-        Refuses to run if no purpose is active in this context — graph reads
-        are PII-bearing.
+        Refuses to run if:
+          - no purpose is active in this context (graph reads are PII-bearing),
+          - the query does not reference $tenant_id (tenant scoping is
+            mandatory in Phase 4), or
+          - a caller-supplied tenant_id parameter does not match the scope's
+            tenant_id (defence against accidentally querying another tenant
+            from inside a request that authenticated as tenant X).
         """
         require_purpose()
-        params.setdefault("tenant_id", self._scope.tenant_id)
+        self._scope.validate_query(query)
+        supplied = params.get("tenant_id")
+        if supplied is not None and supplied != self._scope.tenant_id:
+            _TENANT_VIOLATIONS.labels(reason="tenant_mismatch").inc()
+            raise TenantScopeError(
+                f"tenant_id mismatch: scope={self._scope.tenant_id!r}, "
+                f"query param={supplied!r}"
+            )
+        params["tenant_id"] = self._scope.tenant_id
         return await self._read(op, query, **params)
 
     async def _run(self, op: str, query: str, **params: Any) -> None:

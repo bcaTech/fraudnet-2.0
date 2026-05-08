@@ -94,4 +94,16 @@ def _result_summary(result: AnalysisResult) -> dict[str, Any]:
             }
             for r in result.rings
         ],
+        "cross_opco_count": len(result.cross_opco_rings),
+        "cross_opco_rings": [
+            {
+                "local_ring_id": cor.ring.id,
+                "composite_score": cor.composite_score,
+                "exit_count": len(cor.exits),
+                "confirmation_count": len(cor.confirmations),
+                "peers": sorted({peer for peer, _ in cor.confirmations}),
+                "members_hashed_count": len(cor.members_hashed),
+            }
+            for cor in result.cross_opco_rings
+        ],
     }

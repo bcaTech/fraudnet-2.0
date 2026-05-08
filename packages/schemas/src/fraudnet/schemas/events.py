@@ -254,6 +254,10 @@ class MotifDetectedV1(_EventBase):
         "device_sim_wallet_fusion",
         "sim_carousel",
         "bust_out",
+        # Phase 4 cross-opco motif. Members span hashed identifiers from
+        # multiple opcos; emitted by brain_graph.cross_opco when a local
+        # ring's fund flow exits to a peer-confirmed external identifier.
+        "cross_opco_ring",
     ]
     members: list[Subject]
     confidence: float = Field(ge=0.0, le=1.0)

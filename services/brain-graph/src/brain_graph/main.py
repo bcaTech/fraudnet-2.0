@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from fraudnet.federation import FederationClient
+from fraudnet.federation.client import parse_peers
 from fraudnet.graph import GraphClient
 from fraudnet.kafka import AvroProducer, KafkaSettings
 from fraudnet.obs import configure_logging, configure_tracing, get_logger
@@ -62,11 +64,24 @@ def create_app(
         )
         await motif_producer.start()
 
+        federation: FederationClient | None = None
+        if settings.federation_peers:
+            peers = parse_peers(
+                settings.federation_peers,
+                shared_secret=settings.federation_shared_secret,
+            )
+            if peers:
+                federation = FederationClient(peers)
+                _log.info(
+                    "brain_graph.federation.enabled", peers=",".join(peers)
+                )
+
         analyzer_inst = Analyzer(
             graph_client=graph,
             motif_producer=motif_producer,
             window_hours=settings.extract_window_hours,
             max_nodes=settings.extract_max_nodes,
+            federation=federation,
         )
         sched = BatchScheduler(analyzer=analyzer_inst, interval_s=settings.batch_interval_s)
         app.state.analyzer = analyzer_inst
@@ -80,6 +95,8 @@ def create_app(
             await sched.stop()
             sched_task.cancel()
             await motif_producer.stop()
+            if federation is not None:
+                await federation.close()
             await graph.close()
 
     app = FastAPI(

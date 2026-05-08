@@ -12,6 +12,7 @@ dependencies = [
   "fraudnet-kafka",
   "fraudnet-graph",
   "fraudnet-audit",
+  "fraudnet-federation",
 ]
 
 [tool.uv.sources]
@@ -20,6 +21,7 @@ fraudnet-obs = { workspace = true }
 fraudnet-kafka = { workspace = true }
 fraudnet-graph = { workspace = true }
 fraudnet-audit = { workspace = true }
+fraudnet-federation = { workspace = true }
 
 [dependency-groups]
 dev = ["fraudnet-testing", "httpx>=0.28"]

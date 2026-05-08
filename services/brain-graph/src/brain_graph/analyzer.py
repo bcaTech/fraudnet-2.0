@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from fraudnet.audit import with_purpose
+from fraudnet.federation import FederationClient
 from fraudnet.graph import GraphClient, GraphScope
 from fraudnet.kafka import AvroProducer
 from fraudnet.obs import counter, get_logger, histogram
@@ -25,6 +26,11 @@ from fraudnet.schemas.events import MotifDetectedV1
 from fraudnet.schemas.types import EntityKind, Purpose, RiskScore, Subject
 
 from brain_graph.community import Community, detect_communities
+from brain_graph.cross_opco import (
+    CrossOpcoRing,
+    detect_cross_opco_rings,
+    to_motif_event as cross_opco_to_motif_event,
+)
 from brain_graph.motifs import (
     MotifMatch,
     detect_bust_outs,
@@ -77,6 +83,7 @@ class AnalysisResult:
     motifs: tuple[MotifMatch, ...]
     communities: tuple[Community, ...]
     rings: tuple[RingCandidate, ...]
+    cross_opco_rings: tuple[CrossOpcoRing, ...] = ()
 
 
 class Analyzer:
@@ -89,6 +96,7 @@ class Analyzer:
         window_hours: int = 24,
         max_nodes: int = 5000,
         flagged_domains: frozenset[str] | None = None,
+        federation: FederationClient | None = None,
     ) -> None:
         self._graph = graph_client
         self._producer = motif_producer
@@ -99,6 +107,9 @@ class Analyzer:
         # by reference; the runtime can swap the set without rebuilding the
         # analyser. Empty disables sms_url_blocklist detection.
         self._flagged_domains = flagged_domains or frozenset()
+        # Phase 4: cross-opco federation client. None = federation disabled
+        # (single-opco deployment).
+        self._federation = federation
 
     @property
     def flagged_domains(self) -> frozenset[str]:
@@ -125,13 +136,30 @@ class Analyzer:
             communities = tuple(detect_communities(sg))
             rings = tuple(identify_rings(sg, list(motifs)))
 
+        # Phase 4: federation lookup. Only fires when a federation client
+        # is configured AND the local batch yielded at least one ring with
+        # outgoing flow — otherwise there is nothing to query peers about.
+        cross_opco: tuple[CrossOpcoRing, ...] = ()
+        if self._federation is not None and rings:
+            with _BATCH_DURATION.labels(phase="cross_opco").time():
+                cross_opco = tuple(
+                    await detect_cross_opco_rings(
+                        rings=list(rings),
+                        subgraph=sg,
+                        federation=self._federation,
+                    )
+                )
+
         with _BATCH_DURATION.labels(phase="publish").time():
             await self._publish_motifs(motifs)
+            await self._publish_cross_opco(cross_opco)
 
         _RINGS_FOUND.inc(len(rings))
         _COMMUNITIES_FOUND.inc(len(communities))
         for m in motifs:
             _MOTIFS_FOUND.labels(motif=m.motif).inc()
+        for _ in cross_opco:
+            _MOTIFS_FOUND.labels(motif="cross_opco_ring").inc()
         _log.info(
             "brain_graph.batch_complete",
             nodes=len(sg.nodes),
@@ -139,6 +167,7 @@ class Analyzer:
             motif_count=len(motifs),
             community_count=len(communities),
             ring_count=len(rings),
+            cross_opco_count=len(cross_opco),
         )
         return AnalysisResult(
             extracted_at_ms=int(time.time() * 1000),
@@ -147,6 +176,7 @@ class Analyzer:
             motifs=tuple(motifs),
             communities=communities,
             rings=rings,
+            cross_opco_rings=cross_opco,
         )
 
     def _run_motifs(self, sg: Subgraph) -> list[MotifMatch]:
@@ -165,6 +195,13 @@ class Analyzer:
         for match in motifs:
             event = _to_motif_event(match, tenant_id=self._tenant_id)
             await self._producer.send(event, key=event.members[0].id if event.members else None)
+
+    async def _publish_cross_opco(self, cross_opco: tuple[CrossOpcoRing, ...]) -> None:
+        for cor in cross_opco:
+            event = cross_opco_to_motif_event(cor, tenant_id=self._tenant_id)
+            await self._producer.send(
+                event, key=event.members[0].id if event.members else None
+            )
 
 
 def _to_motif_event(match: MotifMatch, *, tenant_id: str) -> MotifDetectedV1:

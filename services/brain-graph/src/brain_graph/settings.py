@@ -27,6 +27,11 @@ class Settings:
     # Cadence for the scheduled batch (seconds). 15 min per CLAUDE.md §5.3.
     batch_interval_s: int = 900
 
+    # Phase 4 cross-opco federation. `name=url` pairs comma-separated.
+    # Empty disables federation; the analyser then runs single-opco only.
+    federation_peers: str = ""
+    federation_shared_secret: str = "dev-federation-secret-change-me"
+
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8302
 
@@ -43,6 +48,11 @@ class Settings:
             extract_window_hours=int(os.environ.get("BRAIN_GRAPH_WINDOW_HOURS", "24")),
             extract_max_nodes=int(os.environ.get("BRAIN_GRAPH_MAX_NODES", "5000")),
             batch_interval_s=int(os.environ.get("BRAIN_GRAPH_BATCH_INTERVAL_S", "900")),
+            federation_peers=os.environ.get("FEDERATION_PEERS", ""),
+            federation_shared_secret=os.environ.get(
+                "FEDERATION_SHARED_SECRET",
+                "dev-federation-secret-change-me",
+            ),
             host=os.environ.get("BRAIN_GRAPH_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("BRAIN_GRAPH_PORT", "8302")),
         )

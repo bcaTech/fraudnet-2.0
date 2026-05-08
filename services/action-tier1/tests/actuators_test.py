@@ -9,10 +9,13 @@ from fraudnet.schemas.events import DecisionDispatchedV1
 from fraudnet.schemas.types import EntityKind, LatencyTier, Severity, Subject
 from action_tier1.actuators import (
     ActuatorRegistry,
+    DnsSinkholeActuator,
     NoopActuator,
     OtpHoldActuator,
+    SinkholeApiClient,
     UrlBlockActuator,
     VolteTagActuator,
+    _is_locally_allow_listed,
 )
 
 
@@ -133,6 +136,153 @@ class TestOtpHoldActuator:
         decoded = body.decode()
         assert "+233207777777" in decoded
         assert "90" in decoded
+
+
+class TestLocalAllowList:
+    def test_exact_match(self) -> None:
+        assert _is_locally_allow_listed("mtn.com.gh", frozenset({"mtn.com.gh"}))
+
+    def test_subdomain_match(self) -> None:
+        assert _is_locally_allow_listed("login.mtn.com.gh", frozenset({"mtn.com.gh"}))
+
+    def test_unrelated_does_not_match(self) -> None:
+        assert not _is_locally_allow_listed("scam.example.com", frozenset({"mtn.com.gh"}))
+
+    def test_empty_string_does_not_match(self) -> None:
+        assert not _is_locally_allow_listed("", frozenset({"mtn.com.gh"}))
+
+
+class TestDnsSinkholeActuator:
+    async def test_local_allow_list_short_circuits(self) -> None:
+        # url-intel must NOT be called when local allow-list hits.
+        called: dict[str, int] = {"hits": 0}
+
+        def _handler(_request: httpx.Request) -> httpx.Response:
+            called["hits"] += 1
+            return httpx.Response(200, json={"added": True})
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            a = DnsSinkholeActuator(
+                action="dns.sinkhole",
+                url_intel_url="http://url-intel.example",
+                sinkhole_url="http://sink.example/add",
+                actuator_id="dns-sinkhole",
+                local_allow_list=frozenset({"mtn.com.gh"}),
+            )
+            result = await a.execute(
+                _decision(
+                    action="dns.sinkhole",
+                    subject=Subject(kind=EntityKind.URL, id="login.mtn.com.gh"),
+                )
+            )
+        assert result.outcome == "suppressed"
+        assert result.error == "local_allow_listed"
+        assert called["hits"] == 0  # short-circuit before any HTTP
+
+    async def test_url_intel_allow_listed_returns_suppressed(self) -> None:
+        def _handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"added": False, "reason": "allow_listed"})
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            a = DnsSinkholeActuator(
+                action="dns.sinkhole",
+                url_intel_url="http://url-intel.example",
+                sinkhole_url="",
+                actuator_id="dns-sinkhole",
+            )
+            result = await a.execute(
+                _decision(
+                    action="dns.sinkhole",
+                    subject=Subject(kind=EntityKind.URL, id="ecobank.com"),
+                )
+            )
+        assert result.outcome == "suppressed"
+
+    async def test_executes_via_url_intel_only_when_no_sinkhole_url(self) -> None:
+        seen: list[str] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            return httpx.Response(200, json={"added": True})
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            a = DnsSinkholeActuator(
+                action="dns.sinkhole",
+                url_intel_url="http://url-intel.example",
+                sinkhole_url="",  # dev mode — resolver pulls from url-intel
+                actuator_id="dns-sinkhole",
+            )
+            result = await a.execute(
+                _decision(
+                    action="dns.sinkhole",
+                    subject=Subject(kind=EntityKind.URL, id="phish.example.com"),
+                )
+            )
+        assert result.outcome == "executed"
+        assert any("blocklist/add" in u for u in seen)
+
+    async def test_sinkhole_failure_marks_failed(self) -> None:
+        def _handler(request: httpx.Request) -> httpx.Response:
+            if "blocklist/add" in str(request.url):
+                return httpx.Response(200, json={"added": True})
+            return httpx.Response(503, text="bad gateway")
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            a = DnsSinkholeActuator(
+                action="dns.sinkhole",
+                url_intel_url="http://url-intel.example",
+                sinkhole_url="http://sink.example/add",
+                actuator_id="dns-sinkhole",
+            )
+            result = await a.execute(
+                _decision(
+                    action="dns.sinkhole",
+                    subject=Subject(kind=EntityKind.URL, id="phish.example.com"),
+                )
+            )
+        assert result.outcome == "failed"
+        assert "sinkhole" in (result.error or "")
+
+    async def test_rejects_non_url_subject(self) -> None:
+        a = DnsSinkholeActuator(
+            action="dns.sinkhole",
+            url_intel_url="http://url-intel.example",
+            sinkhole_url="",
+            actuator_id="dns-sinkhole",
+        )
+        result = await a.execute(_decision())  # NUMBER subject
+        assert result.outcome == "failed"
+
+
+class TestSinkholeApiClient:
+    async def test_posts_canonical_payload(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["body"] = request.content
+            return httpx.Response(200, json={"ok": True})
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            client = SinkholeApiClient(
+                base_url="http://sink.example/add", timeout_s=0.5, token="t"
+            )
+            status, body = await client.add(
+                domain="phish.example.com",
+                decision_id="dec-1",
+                policy_version="42",
+            )
+        assert status == 200
+        assert body == {"ok": True}
+        assert captured["url"] == "http://sink.example/add"
+        decoded = (captured["body"]).decode()  # type: ignore[union-attr]
+        assert "phish.example.com" in decoded
+        assert "ttl_seconds" in decoded
 
 
 class TestRegistry:

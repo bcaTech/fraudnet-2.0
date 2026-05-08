@@ -43,6 +43,7 @@ def _build_registry(settings: Settings) -> ActuatorRegistry:
     actuators["volte.tag_suspected_spam"] = make(
         "volte.tag_suspected_spam", settings.volte_tag_url, VolteTagActuator, "ims-core"
     )
+    local_allow_list = settings.parse_sinkhole_allow_list()
     if settings.url_intel_url:
         actuators["url.block"] = DnsSinkholeActuator(
             action="url.block",
@@ -51,10 +52,26 @@ def _build_registry(settings: Settings) -> ActuatorRegistry:
             actuator_id="url-intel+dns-sinkhole",
             timeout_s=settings.actuator_timeout_s,
             token=settings.actuator_token or None,
+            local_allow_list=local_allow_list,
+        )
+        # Distinct OTT-layer action — same backing actuator, different name
+        # so policies can pick "sinkhole at the resolver" explicitly without
+        # binding to the legacy `url.block` semantics.
+        actuators["dns.sinkhole"] = DnsSinkholeActuator(
+            action="dns.sinkhole",
+            url_intel_url=settings.url_intel_url,
+            sinkhole_url=settings.url_block_url,
+            actuator_id="dns-sinkhole",
+            timeout_s=settings.actuator_timeout_s,
+            token=settings.actuator_token or None,
+            local_allow_list=local_allow_list,
         )
     else:
         actuators["url.block"] = make(
             "url.block", settings.url_block_url, UrlBlockActuator, "dns-sinkhole"
+        )
+        actuators["dns.sinkhole"] = make(
+            "dns.sinkhole", settings.url_block_url, UrlBlockActuator, "dns-sinkhole"
         )
     actuators["sms.block"] = make(
         "sms.block", settings.sms_block_url, SmsBlockActuator, "smsc-block"

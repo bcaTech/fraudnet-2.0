@@ -147,13 +147,89 @@ class UrlBlockActuator(_HttpActuator):
         )
 
 
+_LOCAL_ALLOW_LIST_HITS = counter(
+    "action_tier1_sinkhole_local_allow_list_hits_total",
+    "Sinkhole calls suppressed by the local actuator-side allow-list.",
+    labelnames=("matched",),
+)
+
+
+class SinkholeApiClient:
+    """Thin HTTP client for a DNS sinkhole / RPZ feed-management API.
+
+    The shape mirrors common DNS sinkhole vendor APIs (BIND RPZ feed
+    management, DNSDist HTTP API, Pi-hole gravity-add). We POST a small
+    JSON document; vendor adapters live behind environment overrides.
+
+    The dev stub adapter — a `httpbin`-style echo or a docker compose
+    sinkhole stub — speaks the same wire format, so production wiring
+    is just a URL change.
+    """
+
+    def __init__(self, *, base_url: str, timeout_s: float, token: str | None) -> None:
+        self._base_url = base_url
+        self._timeout = timeout_s
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    async def add(
+        self,
+        *,
+        domain: str,
+        decision_id: str,
+        policy_version: str,
+        category: str = "phishing",
+    ) -> tuple[int, dict[str, object]]:
+        """POST to the sinkhole. Returns (status_code, body)."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.post(
+                self._base_url,
+                json={
+                    "domain": domain,
+                    "category": category,
+                    "decision_id": decision_id,
+                    "policy_version": policy_version,
+                    "ttl_seconds": 86_400,
+                },
+                headers=self._headers,
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            return resp.status_code, body
+
+
+def _is_locally_allow_listed(domain: str, allow_list: frozenset[str]) -> bool:
+    """Belt-and-suspenders allow-list check at the actuator boundary.
+
+    Even if url-intel were misconfigured or out of sync, we never sinkhole
+    an MTN-owned or critical-services domain. Match is exact or as a
+    registrable suffix (login.mtn.com.gh ↦ matches mtn.com.gh).
+    """
+    d = domain.strip().lower().rstrip(".")
+    if not d:
+        return False
+    if d in allow_list:
+        return True
+    labels = d.split(".")
+    for i in range(1, len(labels)):
+        if ".".join(labels[i:]) in allow_list:
+            return True
+    return False
+
+
 class DnsSinkholeActuator(Actuator):
     """Two-step: register the domain at url-intel, then push to the DNS sinkhole.
 
-    Composes a POST to url-intel `/blocklist/add` (allow-list filtering
-    happens there — `added=False` for allow-listed domains is success from
-    the actuator's perspective) and a POST to the configured DNS resolver
-    block endpoint. Either failure marks the action `failed`.
+    Order of defence:
+      1. Local allow-list short-circuit at the actuator (defensive).
+      2. url-intel `/blocklist/add` (authoritative allow-list + dedup).
+      3. SinkholeApiClient.add() against the resolver-side block API.
+      4. Both must succeed; any failure marks the action `failed`.
+
+    The sinkhole client is injected so tests can pass a stub speaking the
+    real wire format. In dev (`sinkhole_url` empty) we register at url-intel
+    only and rely on the resolver's pull-side `/blocklist/export`.
     """
 
     def __init__(
@@ -165,13 +241,21 @@ class DnsSinkholeActuator(Actuator):
         actuator_id: str,
         timeout_s: float = 0.1,
         token: str | None = None,
+        local_allow_list: frozenset[str] = frozenset(),
+        sinkhole_client: SinkholeApiClient | None = None,
     ) -> None:
         self.action = action
         self.actuator_id = actuator_id
         self._url_intel = url_intel_url.rstrip("/")
-        self._sinkhole = sinkhole_url
+        self._sinkhole_url = sinkhole_url
         self._timeout = timeout_s
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+        self._local_allow_list = local_allow_list
+        if sinkhole_client is None and sinkhole_url:
+            sinkhole_client = SinkholeApiClient(
+                base_url=sinkhole_url, timeout_s=timeout_s, token=token
+            )
+        self._sinkhole_client = sinkhole_client
 
     async def execute(self, decision: DecisionDispatchedV1) -> ActuationResult:
         if decision.subject.kind.value != "url":
@@ -179,9 +263,27 @@ class DnsSinkholeActuator(Actuator):
                 outcome="failed", actuator_id=self.actuator_id, error="not a url subject"
             )
         domain = decision.subject.id
+
+        # 1. Local defensive allow-list. Logs WARN so an alert can fire if
+        # we ever see this — it indicates url-intel and the local list have
+        # drifted enough that a real block would have hit a critical domain.
+        if _is_locally_allow_listed(domain, self._local_allow_list):
+            _LOCAL_ALLOW_LIST_HITS.labels(matched="true").inc()
+            _INVOCATIONS.labels(action=self.action, outcome="suppressed").inc()
+            _log.warning(
+                "tier1.sinkhole.local_allow_list_hit",
+                domain=domain,
+                decision_id=decision.decision_id,
+            )
+            return ActuationResult(
+                outcome="suppressed",
+                actuator_id=self.actuator_id,
+                error="local_allow_listed",
+            )
+
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                # 1. Register with url-intel (allow-list-aware).
+                # 2. Register with url-intel (authoritative allow-list-aware).
                 ui_resp = await client.post(
                     f"{self._url_intel}/blocklist/add",
                     json={
@@ -200,37 +302,29 @@ class DnsSinkholeActuator(Actuator):
                         error=f"url-intel http {ui_resp.status_code}",
                     )
                 body = ui_resp.json()
-                # If the domain is allow-listed, url-intel returns added=false
-                # with reason="allow_listed". Treat that as a `suppressed`
-                # outcome — we deliberately did not block.
                 if not body.get("added", False) and body.get("reason") == "allow_listed":
                     _INVOCATIONS.labels(action=self.action, outcome="suppressed").inc()
                     return ActuationResult(
                         outcome="suppressed", actuator_id=self.actuator_id, error="allow_listed"
                     )
 
-                # 2. Push the (allow-list-filtered) domain to the DNS sinkhole.
-                if not self._sinkhole:
-                    # Dev mode — url-intel registration is enough; the DNS
-                    # resolver pulls /blocklist/export on its own schedule.
+                # 3. Push to the DNS sinkhole. Dev mode (no sinkhole_url) relies
+                # on the resolver pulling /blocklist/export from url-intel.
+                if self._sinkhole_client is None:
                     _INVOCATIONS.labels(action=self.action, outcome="executed").inc()
                     return ActuationResult(outcome="executed", actuator_id=self.actuator_id)
 
-                sink_resp = await client.post(
-                    self._sinkhole,
-                    json={
-                        "domain": domain,
-                        "decision_id": decision.decision_id,
-                        "policy_version": decision.policy_version,
-                    },
-                    headers=self._headers,
+                status, _ = await self._sinkhole_client.add(
+                    domain=domain,
+                    decision_id=decision.decision_id,
+                    policy_version=decision.policy_version,
                 )
-                if sink_resp.status_code >= 400:
+                if status >= 400:
                     _INVOCATIONS.labels(action=self.action, outcome="failed").inc()
                     return ActuationResult(
                         outcome="failed",
                         actuator_id=self.actuator_id,
-                        error=f"sinkhole http {sink_resp.status_code}",
+                        error=f"sinkhole http {status}",
                     )
                 _INVOCATIONS.labels(action=self.action, outcome="executed").inc()
                 return ActuationResult(outcome="executed", actuator_id=self.actuator_id)

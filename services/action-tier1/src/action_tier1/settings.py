@@ -30,6 +30,16 @@ class Settings:
     actuator_timeout_s: float = 0.1   # 100ms cap for inline budget
     otp_hold_duration_s: int = 60     # how long the SMSC holds the OTP message
 
+    # Defensive local allow-list at the actuator boundary. The authoritative
+    # source is url-intel, but if a misconfiguration there would otherwise
+    # let us sinkhole an MTN-owned or critical-services domain, this list
+    # short-circuits the call with a `suppressed` outcome and logs a WARN
+    # we can alert on. CSV; entries match exact and as a registrable suffix.
+    sinkhole_local_allow_list: str = (
+        "mtn.com.gh,mtn.com,momo.mtn.com.gh,bog.gov.gh,nca.org.gh,"
+        "google.com,facebook.com,whatsapp.com,apple.com,microsoft.com,amazon.com"
+    )
+
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8201
 
@@ -50,6 +60,16 @@ class Settings:
             actuator_token=os.environ.get("ACTUATOR_TOKEN", ""),
             actuator_timeout_s=float(os.environ.get("ACTUATOR_TIMEOUT_S", "0.1")),
             otp_hold_duration_s=int(os.environ.get("OTP_HOLD_DURATION_S", "60")),
+            sinkhole_local_allow_list=os.environ.get(
+                "SINKHOLE_LOCAL_ALLOW_LIST",
+                "mtn.com.gh,mtn.com,momo.mtn.com.gh,bog.gov.gh,nca.org.gh,"
+                "google.com,facebook.com,whatsapp.com,apple.com,microsoft.com,amazon.com",
+            ),
             host=os.environ.get("ACTION_TIER1_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("ACTION_TIER1_PORT", "8201")),
+        )
+
+    def parse_sinkhole_allow_list(self) -> frozenset[str]:
+        return frozenset(
+            s.strip().lower() for s in self.sinkhole_local_allow_list.split(",") if s.strip()
         )

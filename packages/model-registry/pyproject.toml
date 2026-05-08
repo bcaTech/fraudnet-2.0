@@ -1,0 +1,19 @@
+[project]
+name = "fraudnet-model-registry"
+version = "0.1.0"
+description = "Object-storage-backed model registry (S3/MinIO)"
+requires-python = ">=3.12"
+dependencies = [
+  "boto3>=1.35",
+  "fraudnet-obs",
+]
+
+[tool.uv.sources]
+fraudnet-obs = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fraudnet"]

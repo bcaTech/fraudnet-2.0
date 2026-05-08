@@ -11,6 +11,7 @@ from fraudnet.obs import configure_logging, configure_tracing, get_logger
 from fraudnet.schemas.signals import SignalEventV1
 from brain_content.api import router
 from brain_content.classifier import ContentClassifier, HeuristicContentClassifier
+from brain_content.ml_classifier import TfidfLrClassifier
 from brain_content.runner import ContentRunner, make_settings_factory
 from brain_content.settings import Settings
 from brain_content.url_reputation import StaticBlocklist
@@ -20,11 +21,26 @@ _log = get_logger("brain_content.main")
 
 def _build_classifier(settings: Settings) -> ContentClassifier:
     blocklist = StaticBlocklist(bad_domains=settings.parse_list("bad_domains"))
-    return HeuristicContentClassifier(
+    heuristic = HeuristicContentClassifier(
         url_reputation=blocklist,
         bad_template_hashes=settings.parse_list("bad_url_template_hashes"),
         bad_body_hashes=settings.parse_list("bad_body_hashes"),
     )
+    if not settings.use_model_registry:
+        return heuristic
+    try:
+        from fraudnet.registry import ModelRegistry
+
+        registry = ModelRegistry(
+            endpoint_url=settings.model_registry_endpoint,
+            bucket=settings.model_registry_bucket,
+            access_key=settings.model_registry_access_key,
+            secret_key=settings.model_registry_secret_key,
+        )
+        return TfidfLrClassifier.load_from_registry(registry, heuristic=heuristic)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("brain_content.registry_unavailable", error=str(exc))
+        return heuristic
 
 
 def create_app(

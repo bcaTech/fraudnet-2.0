@@ -40,6 +40,10 @@ x-app-env: &app-env
   AEROSPIKE_HOSTS: aerospike:3000
   POSTGRES_DSN: postgres://fraudnet:fraudnet_dev@postgres:5432/fraudnet
   AUDIT_POSTGRES_DSN: postgres://fraudnet:fraudnet_dev@postgres:5432/fraudnet_audit
+  MODEL_REGISTRY_ENDPOINT: http://minio:9000
+  MODEL_REGISTRY_BUCKET: fraudnet-models
+  MODEL_REGISTRY_ACCESS_KEY: fraudnet
+  MODEL_REGISTRY_SECRET_KEY: fraudnet_dev_minio
   JWT_ISSUER: http://keycloak:8080/realms/fraudnet
   JWKS_URL: http://keycloak:8080/realms/fraudnet/protocol/openid-connect/certs
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

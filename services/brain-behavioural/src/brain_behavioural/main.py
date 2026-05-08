@@ -11,11 +11,38 @@ from fraudnet.kafka import AvroProducer, KafkaSettings
 from fraudnet.obs import configure_logging, configure_tracing, get_logger
 from fraudnet.schemas.signals import SignalEventV1
 from brain_behavioural.api import router
+from brain_behavioural.lgbm_scorer import LightGBMScorer
 from brain_behavioural.runner import BehaviouralRunner, make_settings_factory
 from brain_behavioural.scorer import HeuristicScorer, Scorer
 from brain_behavioural.settings import Settings
 
 _log = get_logger("brain_behavioural.main")
+
+
+def _build_scorer(settings: Settings) -> Scorer:
+    """Try the registry first; fall back to the heuristic if no champion or
+    the registry is unreachable. Either path is operationally valid — dev
+    environments without MinIO still work."""
+    if not settings.use_model_registry:
+        return HeuristicScorer()
+    try:
+        from fraudnet.registry import ModelRegistry, RegistryError
+
+        registry = ModelRegistry(
+            endpoint_url=settings.model_registry_endpoint,
+            bucket=settings.model_registry_bucket,
+            access_key=settings.model_registry_access_key,
+            secret_key=settings.model_registry_secret_key,
+        )
+        scorer = LightGBMScorer.load_from_registry(registry)
+        # If neither model loaded, just use the heuristic to avoid log spam.
+        if scorer._number is None and scorer._wallet is None:  # noqa: SLF001
+            _log.info("brain_behavioural.no_models_in_registry")
+            return HeuristicScorer()
+        return scorer
+    except (ImportError, Exception) as exc:  # noqa: BLE001
+        _log.warning("brain_behavioural.registry_unavailable", error=str(exc))
+        return HeuristicScorer()
 
 
 def _aerospike_hosts(spec: str) -> list[tuple[str, int]]:
@@ -55,7 +82,7 @@ def create_app(
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
         store = AerospikeFeatureStore(hosts=_aerospike_hosts(settings.aerospike_hosts))
-        scorer_inst: Scorer = HeuristicScorer()
+        scorer_inst: Scorer = _build_scorer(settings)
         kafka_settings = KafkaSettings(
             bootstrap_servers=settings.kafka_bootstrap_servers,
             schema_registry_url=settings.schema_registry_url,

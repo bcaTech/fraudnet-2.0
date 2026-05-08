@@ -12,15 +12,20 @@ Non-obvious choices made during the Phase 1 build that deviate from CLAUDE.md, t
 
 ---
 
-## D-002 — Stream jobs in PyFlink, not Java/Scala
+## D-002 — Stream jobs ship as Python consumers in Phase 1; PyFlink wrapper ready for Phase 2
 
-**Decision:** `stream-features` and `stream-graph` ship as **PyFlink** jobs in Phase 1.
+**Decision:** `stream-features` and `stream-graph` are structured as pure-Python streaming consumers in Phase 1. The transformation logic lives in a `pipeline.py` module that's table-API-friendly, with a thin `pyflink_job.py` wrapper provided for the day we promote to a Flink cluster.
 
-**Why CLAUDE.md says otherwise:** §4.1 says "PyFlink only for prototyping. Production jobs are Java/Scala."
+**Why CLAUDE.md says otherwise:** §4.1 says "Production jobs are Java/Scala." (PyFlink is positioned as prototyping.)
 
-**Why we're deviating:** Phase 1 build velocity. The current team is Python-first; a JVM build chain doubles the per-service complexity for jobs that are still under iteration. The Flink job logic stays small and table-API-driven so a port to Java/Scala in Phase 2/3 is mechanical, not a redesign.
+**Why staged migration:**
+- **Phase 1 (now):** Standalone Python consumer pod. Deployable on the existing k8s cluster, no Flink cluster ops to introduce mid-Phase-1, no JAR build chain. Uses the same `fraudnet-kafka` primitives every other service uses. Backpressure via manual commit cadence.
+- **Phase 2:** Promote to PyFlink on the Flink Kubernetes Operator once we have realistic load profiles. The pipeline functions are written to be table-API-friendly so the wrapper is mechanical.
+- **Phase 3+:** If/when load demands it, the table-API job ports to Java/Scala.
 
-**Revisit:** Before scaling beyond MTN-Ghana volumes (~100M events/day). The pyflink-vs-jvm decision should be re-benchmarked as soon as we have realistic load profiles from probe vendor selection.
+The cost is one extra refactor per stream service. The benefit is shipping Phase 1 without a heavy new operational dependency.
+
+**Revisit:** Before MTN-Ghana scale tests cross ~30k events/sec sustained on a single voice partition.
 
 ---
 

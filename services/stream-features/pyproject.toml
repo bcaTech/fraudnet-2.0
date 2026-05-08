@@ -1,0 +1,30 @@
+[project]
+name = "stream-features"
+version = "0.1.0"
+description = "Window-aggregate voice/sms/momo events into the Aerospike feature store"
+requires-python = ">=3.12"
+dependencies = [
+  "fraudnet-schemas",
+  "fraudnet-obs",
+  "fraudnet-kafka",
+  "fraudnet-features",
+]
+
+[tool.uv.sources]
+fraudnet-schemas = { workspace = true }
+fraudnet-obs = { workspace = true }
+fraudnet-kafka = { workspace = true }
+fraudnet-features = { workspace = true }
+
+[dependency-groups]
+dev = ["fraudnet-testing", "pytest>=8.3"]
+
+[tool.uv.sources.fraudnet-testing]
+workspace = true
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stream_features"]

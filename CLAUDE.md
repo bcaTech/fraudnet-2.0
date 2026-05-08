@@ -684,6 +684,23 @@ This document covers the steady-state architecture. The build sequences as follo
 
 **Phase 4 (months 18–24):** `api-enterprise` and the B2B portal scope. Federated graph across MTN Group opcos. Group-level platform service.
 
+Phase 4 deliverables (built):
+
+- **`services/api-enterprise`** — B2B portal API. Each enterprise customer is a Keycloak realm tenant; `tenant_id` is carried on every issued token. Tenant isolation enforced at four layers: JWT decode, RBAC, Redis-backed per-tenant rate limit, and the data layer (Postgres RLS + Memgraph `GraphScope`). See `docs/architecture/tenant-isolation.md` for the depth-of-defence diagram. Routes:
+  - `/tenant/dashboard | /tenant/alerts | /tenant/report | /tenant/shared-flags | /tenant/block-request` — tenant-scoped (`ENTERPRISE_USER`/`ENTERPRISE_ADMIN`).
+  - `/group/overview | /group/cross-opco-rings | /group/trending-motifs | /group/shared-flag-volume` — cross-tenant Group view (`GROUP_ADMIN` role; not tenant-scoped).
+  - `/admin/tenants` — tenant provisioning (`SYSTEM_ADMIN` + step-up). Creates a `:Tenant` graph node so all subsequent writes carry the tenant marker.
+
+- **`packages/federation`** — cross-opco graph federation protocol. PII stays local; only salted SHA-256 hashes, truncated device fingerprints, and aggregate risk scores cross opco boundaries. Three operations: `lookup_flags`, `query_subgraph`, `publish_flag`. HMAC-signed (Phase 4) → mTLS+SPIFFE (Phase 4.5). Wire format documented at `docs/architecture/federation-protocol.md`.
+
+- **Cross-opco ring detection in `brain-graph`** — when a local ring's fund flow exits to an external MSISDN/wallet, the analyser hashes the external identifier and asks every configured peer opco. Any peer confirmation lifts the ring to cross-opco priority and emits a `cross_opco_ring` motif on `motifs.detected.v1`. The detector is **not** on the inline path — it runs only in the scheduled batch (15 min cadence) where peer round-trip latency is acceptable.
+
+- **`fraudnet.graph.GraphScope` hardening** — `validate_query()` refuses Cypher that doesn't reference `$tenant_id`; `cypher()` refuses if a caller-supplied `tenant_id` parameter doesn't match the scope's tenant. The slug pattern is enforced at `GraphScope` construction. Memgraph has no RLS, so this is the architectural enforcement of multi-tenant isolation on the graph.
+
+- **`fraudnet.auth.Role.GROUP_ADMIN`** — group-level role for cross-tenant analytics. Holders see aggregates across all tenants; never grant casually.
+
+- **Architecture diagrams** — `docs/architecture/` carries the C4 L1 (system context), C4 L2 (containers), federation sequence, end-to-end data flow, and tenant isolation depth-of-defence diagrams. Update them when contracts change.
+
 ---
 
 ## 14. Reading order for new engineers

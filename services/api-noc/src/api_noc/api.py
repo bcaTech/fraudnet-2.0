@@ -69,6 +69,25 @@ def _principal(request: Request) -> Principal:
 # ----------------------------------------------------------------------
 
 
+class FeatureContributionOut(BaseModel):
+    feature: str
+    value: float
+    baseline: float | None = None
+    weight: float
+
+
+class XaiBreakdown(BaseModel):
+    """XAI surface for an alert detail.
+
+    Sourced from `details.xai`, which is populated by the decisions
+    service when it persists an alert from a `SignalEventV1` carrying
+    `feature_contributions` + `explanation_text`.
+    """
+
+    explanation_text: str | None = None
+    top_features: list[FeatureContributionOut] = []
+
+
 class AlertOut(BaseModel):
     id: UUID
     type: str
@@ -85,6 +104,7 @@ class AlertOut(BaseModel):
     decision_id: str | None
     created_at: Any
     updated_at: Any
+    xai: XaiBreakdown | None = None
 
 
 class RingOut(BaseModel):
@@ -197,7 +217,37 @@ async def get_alert(
             actor_id=principal.subject,
             tenant_id=principal.tenant_id,
         )
-        return AlertOut.model_validate(row)
+        out = AlertOut.model_validate(row)
+        out.xai = _xai_from_details(row.get("details") or {})
+        return out
+
+
+def _xai_from_details(details: dict[str, Any]) -> XaiBreakdown | None:
+    """Pull the XAI block out of the alert's details JSON, if any.
+
+    Decisions persists `details.xai = {explanation_text, top_features}`
+    when it materialises an alert from a SignalEventV1 carrying
+    `feature_contributions` + `explanation_text`. Older alerts have
+    no XAI block; we return None rather than a placeholder.
+    """
+    raw = details.get("xai") if isinstance(details, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    top = raw.get("top_features") or []
+    features: list[FeatureContributionOut] = []
+    for entry in top:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            features.append(FeatureContributionOut.model_validate(entry))
+        except Exception:  # noqa: BLE001
+            # Schema drift in the persisted JSON should not break the
+            # detail view; skip the malformed row and continue.
+            continue
+    return XaiBreakdown(
+        explanation_text=raw.get("explanation_text"),
+        top_features=features,
+    )
 
 
 @router.post("/alerts/{alert_id}/claim", response_model=AlertOut)

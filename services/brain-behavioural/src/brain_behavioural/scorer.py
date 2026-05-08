@@ -3,18 +3,31 @@
 Phase 1 implementation is a hand-coded heuristic. Phase 2 swaps to a
 LightGBM-trained model behind the same interface (DECISIONS.md D-006). All
 scoring goes through `Scorer.score_*`; nothing else gets to compute scores.
+
+Best-of-breed sprint: every scoring result now also carries the set of
+features the rule keyed on (`boost_features`). The materialiser
+(`to_signal`) feeds that into `fraudnet.xai` to produce
+`feature_contributions` + `explanation_text` on the published
+`SignalEventV1`. The XAI surface is therefore present on every signal
+regardless of which model produced it.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import time
 from uuid import uuid4
 
 from fraudnet.features.snapshot import NumberFeatures, WalletFeatures
 from fraudnet.schemas.signals import SignalEventV1
 from fraudnet.schemas.types import EntityKind, RiskScore, Severity, Subject
+from fraudnet.xai import (
+    StaticBaselineProvider,
+    contributions_from_evidence,
+    explain_signal,
+    rank_contributions,
+)
 
 MODEL_ID = "behavioural-heuristic"
 MODEL_VERSION = "0.1.0"
@@ -26,6 +39,10 @@ class ScoringResult:
     signal_kind: str | None  # None when below threshold
     severity: Severity
     evidence: dict[str, str | int | float | bool]
+    # Names of features the rule specifically keyed on. Lets the XAI
+    # ranker boost their weight so the explanation surfaces them above
+    # incidentally-elevated other features.
+    boost_features: tuple[str, ...] = field(default_factory=tuple)
 
 
 class Scorer(ABC):
@@ -61,6 +78,7 @@ class HeuristicScorer(Scorer):
                 signal_kind="voice.velocity_burst",
                 severity=Severity.HIGH,
                 evidence=evidence,
+                boost_features=("vel_1m", "fanout_1h"),
             )
 
         # SIM/IMEI churn — possible compromise. RCS-verified senders are
@@ -72,6 +90,7 @@ class HeuristicScorer(Scorer):
                 signal_kind="device.imei_churn",
                 severity=Severity.MEDIUM,
                 evidence=evidence,
+                boost_features=("imei_count",),
             )
 
         # SMS bulk template — possible smishing operator
@@ -81,6 +100,7 @@ class HeuristicScorer(Scorer):
                 signal_kind="sms.bulk_template",
                 severity=Severity.HIGH,
                 evidence=evidence,
+                boost_features=("sms_freq_1h",),
             )
 
         # Sub-threshold — emit a low score with no signal_kind
@@ -109,6 +129,7 @@ class HeuristicScorer(Scorer):
                 signal_kind="momo.mule_velocity",
                 severity=Severity.HIGH,
                 evidence=evidence,
+                boost_features=("txn_velocity_1h", "counterparty_diversity_24h"),
             )
 
         # Cash-in/cash-out arbitrage: high p95 amount with high velocity
@@ -118,6 +139,7 @@ class HeuristicScorer(Scorer):
                 signal_kind="momo.high_value_velocity",
                 severity=Severity.MEDIUM,
                 evidence=evidence,
+                boost_features=("value_p95_24h", "txn_velocity_1h"),
             )
 
         return ScoringResult(
@@ -138,6 +160,9 @@ def _score(value: float, evidence: dict[str, str | int | float | bool]) -> RiskS
     )
 
 
+_BASELINES = StaticBaselineProvider.default()
+
+
 def to_signal(
     *,
     result: ScoringResult,
@@ -148,12 +173,29 @@ def to_signal(
 ) -> SignalEventV1 | None:
     """Materialise a SignalEventV1 from a scoring result. Returns None if
     the result was sub-threshold (signal_kind is None).
+
+    Attaches XAI fields:
+      - `feature_contributions`: top-3 features ranked by |weight|.
+      - `explanation_text`: one-sentence explanation tying score to
+        the dominant features.
     """
     if result.signal_kind is None:
         return None
     now_ms = int(time() * 1000)
     subject = Subject(kind=subject_kind, id=subject_id)
     suppression_key = f"{tenant_id}:{subject_kind.value}:{subject_id}:{result.signal_kind}"
+
+    contributions = contributions_from_evidence(
+        dict(result.evidence),
+        baselines=_BASELINES,
+        boost_features=result.boost_features,
+    )
+    top = rank_contributions(contributions, top_n=3)
+    explanation = explain_signal(
+        signal_kind=result.signal_kind,
+        score=result.score.value,
+        top_contributions=top,
+    )
     return SignalEventV1(
         event_id=f"sig_{uuid4().hex[:24]}",
         event_ts_ms=now_ms,
@@ -166,4 +208,6 @@ def to_signal(
         severity=result.severity,
         evidence=result.evidence,
         suppression_key=suppression_key,
+        feature_contributions=top,
+        explanation_text=explanation,
     )

@@ -228,10 +228,56 @@ def to_signal(
     source: str,
     tenant_id: str = "mtn-ghana",
 ) -> SignalEventV1 | None:
+    """Materialise a content-classification result as a SignalEventV1.
+
+    Attaches XAI: `feature_contributions` derived from the matched
+    pattern + terms (no PII; pattern fragments are public scam-template
+    text), and a one-sentence `explanation_text`.
+    """
+    from fraudnet.xai import (
+        PatternMatch,
+        explain_content_signal,
+        rank_contributions,
+        score_pattern_match,
+    )
+
     if result.signal_kind is None:
         return None
     now_ms = int(time() * 1000)
     suppression_key = f"{tenant_id}:number:{sender_msisdn}:{result.signal_kind}"
+
+    matched_terms = tuple(
+        str(v)
+        for k, v in result.evidence.items()
+        if k.startswith("matched_") and isinstance(v, str)
+    )
+    domain = next(
+        (
+            str(v)
+            for k, v in result.evidence.items()
+            if k in ("domain", "lookalike_brand", "shortener_host")
+            and isinstance(v, str)
+        ),
+        None,
+    )
+    pattern_label = _CONTENT_PATTERN_LABELS.get(result.signal_kind, result.signal_kind)
+    match = PatternMatch(
+        pattern_id=result.signal_kind,
+        pattern_label=pattern_label,
+        score=result.score.value,
+        matched_terms=matched_terms,
+        domain=domain,
+    )
+    contributions = score_pattern_match(match)
+    top = rank_contributions(contributions, top_n=3)
+    explanation = explain_content_signal(
+        signal_kind=result.signal_kind,
+        score=result.score.value,
+        pattern_label=pattern_label,
+        matched_terms=list(matched_terms),
+        domain=domain,
+    )
+
     return SignalEventV1(
         event_id=f"sig_{uuid4().hex[:24]}",
         event_ts_ms=now_ms,
@@ -244,4 +290,16 @@ def to_signal(
         severity=result.severity,
         evidence=result.evidence,
         suppression_key=suppression_key,
+        feature_contributions=top,
+        explanation_text=explanation,
     )
+
+
+_CONTENT_PATTERN_LABELS: dict[str, str] = {
+    "sms.known_bad_body": "Known-bad SMS body",
+    "sms.known_bad_template": "Known-bad SMS template",
+    "sms.template_smishing": "Smishing template",
+    "sms.malicious_url": "Malicious URL",
+    "sms.ott_lookalike": "OTT brand lookalike",
+    "sms.url_shortener_abuse": "URL shortener abuse",
+}

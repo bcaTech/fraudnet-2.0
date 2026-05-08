@@ -35,7 +35,7 @@ from fraudnet.schemas.events import (
     SmsEventV1,
     VoiceEventV1,
 )
-from fraudnet.schemas.signals import SignalEventV1
+from fraudnet.schemas.signals import FeatureContribution, SignalEventV1
 from fraudnet.schemas.types import (
     EntityKind,
     LatencyTier,
@@ -69,6 +69,7 @@ __all__ = [
     "MoMoEventV1",
     "MoMoEventType",
     "MotifDetectedV1",
+    "FeatureContribution",
     "SignalEventV1",
     "SmsEventV1",
     "VoiceEventV1",

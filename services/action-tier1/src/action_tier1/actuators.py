@@ -177,6 +177,54 @@ class MoMoSendWithCareActuator(_HttpActuator):
         )
 
 
+class OtpHoldActuator(_HttpActuator):
+    """Hold an OTP-bearing SMS at the SMSC and notify the customer.
+
+    Inline action for the `otp.hold_and_alert` decision: the upstream
+    detector (brain-otp-guard) flagged that an OTP SMS arrived while the
+    recipient was on a call. Two-step adapter call (single HTTP POST in
+    Phase 1; SMSC integration is stubbed to NoopActuator until the SMSC
+    contract is finalised — see runbook):
+
+      1. Hold the SMS (delay delivery by `hold_duration_s`).
+      2. Push a USSD prompt to the recipient asking to confirm release.
+
+    Real SMSC wiring (vendor-specific) lands when the integration team
+    delivers the OTA / SMSC adapter spec.
+    """
+
+    def __init__(
+        self,
+        *,
+        action: str,
+        url: str,
+        actuator_id: str,
+        timeout_s: float = 0.1,
+        token: str | None = None,
+        hold_duration_s: int = 60,
+    ) -> None:
+        super().__init__(
+            action=action, url=url, actuator_id=actuator_id, timeout_s=timeout_s, token=token
+        )
+        self._hold_duration_s = hold_duration_s
+
+    async def execute(self, decision: DecisionDispatchedV1) -> ActuationResult:
+        if decision.subject.kind.value != "number":
+            return ActuationResult(
+                outcome="failed", actuator_id=self.actuator_id, error="not a number subject"
+            )
+        return await self._post(
+            {
+                "msisdn": decision.subject.id,
+                "hold_duration_s": self._hold_duration_s,
+                "prompt": "otp_fraud_warning",
+                "caller": decision.metadata.get("caller", ""),
+                "decision_id": decision.decision_id,
+                "policy_version": decision.policy_version,
+            }
+        )
+
+
 class ActuatorRegistry:
     """Maps decision.action → Actuator implementation."""
 

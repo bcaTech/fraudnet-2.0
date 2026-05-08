@@ -21,9 +21,11 @@ class Settings:
     url_block_url: str = ""
     sms_block_url: str = ""
     momo_friction_url: str = ""
+    otp_hold_url: str = ""
     actuator_token: str = ""
 
     actuator_timeout_s: float = 0.1   # 100ms cap for inline budget
+    otp_hold_duration_s: int = 60     # how long the SMSC holds the OTP message
 
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8201
@@ -40,8 +42,10 @@ class Settings:
             url_block_url=os.environ.get("URL_BLOCK_URL", ""),
             sms_block_url=os.environ.get("SMS_BLOCK_URL", ""),
             momo_friction_url=os.environ.get("MOMO_FRICTION_URL", ""),
+            otp_hold_url=os.environ.get("OTP_HOLD_URL", ""),
             actuator_token=os.environ.get("ACTUATOR_TOKEN", ""),
             actuator_timeout_s=float(os.environ.get("ACTUATOR_TIMEOUT_S", "0.1")),
+            otp_hold_duration_s=int(os.environ.get("OTP_HOLD_DURATION_S", "60")),
             host=os.environ.get("ACTION_TIER1_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("ACTION_TIER1_PORT", "8201")),
         )

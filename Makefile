@@ -17,7 +17,7 @@ COMPOSE := docker compose -f docker-compose.dev.yml
 # Application services (13 — Phase 1). Infra services live in INFRA_SERVICES.
 APP_SERVICES := ingest-momo ingest-voice ingest-sms \
                 stream-features stream-graph \
-                brain-behavioural brain-content \
+                brain-behavioural brain-content brain-otp-guard \
                 decisions action-tier1 action-tier2 \
                 api-noc api-customer compliance
 

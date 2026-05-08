@@ -563,6 +563,32 @@ services:
       retries: 5
       start_period: 30s
 
+  brain-otp-guard:
+    <<: *app-defaults
+    container_name: fraudnet-brain-otp-guard
+    ports: ["8311:8311"]
+    environment:
+      <<: *app-env
+      BRAIN_OTP_HOST: 0.0.0.0
+      BRAIN_OTP_PORT: "8311"
+      BRAIN_OTP_GROUP: brain-otp-guard-dev
+      BRAIN_OTP_REDIS_URL: redis://redis:6379/3
+      BRAIN_OTP_BANK_SHORT_CODES: "MTN,ECOBANK,GCB,STANBIC,FBN,UBA,CALBANK,ZENITH,FIDELITY,ABSA,GTBANK"
+    command: >
+      uv run --package brain-otp-guard uvicorn brain_otp_guard.main:app
+      --host 0.0.0.0 --port 8311 --reload --reload-dir /workspace/services/brain-otp-guard
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8311/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   brain-graph:
     <<: *app-defaults
     container_name: fraudnet-brain-graph
@@ -628,6 +654,8 @@ services:
       URL_BLOCK_URL: http://localhost:9999/url/block
       SMS_BLOCK_URL: http://localhost:9999/sms/block
       MOMO_FRICTION_URL: http://localhost:9999/momo/friction
+      OTP_HOLD_URL: ""
+      OTP_HOLD_DURATION_S: "60"
       ACTUATOR_TOKEN: dev-actuator-token
     command: >
       uv run --package action-tier1 uvicorn action_tier1.main:app

@@ -37,6 +37,18 @@ rules:
     tier: tier1
     suppression_window_s: 3600
 
+  # OTP-during-call interception (brain-otp-guard). Hold the OTP SMS at the
+  # SMSC and push a USSD warning to the recipient. The detection is itself
+  # high-precision (active call + OTP-shaped SMS), so we suppress for a
+  # short window to avoid double-alerting if the same scammer retries.
+  - id: otp-during-call-tier1
+    match:
+      signal_kind: otp.during_call
+      severity_in: [critical, high]
+    action: otp.hold_and_alert
+    tier: tier1
+    suppression_window_s: 300
+
   # ---- Tier 1: motif (the moat) ----
   - id: voice-sms-momo-24h-motif-tier1
     match:

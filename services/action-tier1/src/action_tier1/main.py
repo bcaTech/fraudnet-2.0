@@ -14,6 +14,7 @@ from action_tier1.actuators import (
     ActuatorRegistry,
     MoMoSendWithCareActuator,
     NoopActuator,
+    OtpHoldActuator,
     SmsBlockActuator,
     UrlBlockActuator,
     VolteTagActuator,
@@ -53,6 +54,17 @@ def _build_registry(settings: Settings) -> ActuatorRegistry:
         MoMoSendWithCareActuator,
         "momo-bss",
     )
+    if settings.otp_hold_url:
+        actuators["otp.hold_and_alert"] = OtpHoldActuator(
+            action="otp.hold_and_alert",
+            url=settings.otp_hold_url,
+            actuator_id="smsc-otp-hold",
+            timeout_s=settings.actuator_timeout_s,
+            token=settings.actuator_token or None,
+            hold_duration_s=settings.otp_hold_duration_s,
+        )
+    else:
+        actuators["otp.hold_and_alert"] = NoopActuator(action="otp.hold_and_alert")
     return ActuatorRegistry(actuators)
 
 

@@ -10,6 +10,7 @@ from fraudnet.schemas.types import EntityKind, LatencyTier, Severity, Subject
 from action_tier1.actuators import (
     ActuatorRegistry,
     NoopActuator,
+    OtpHoldActuator,
     UrlBlockActuator,
     VolteTagActuator,
 )
@@ -93,6 +94,45 @@ class TestUrlBlockActuator:
         )
         result = await a.execute(_decision())  # number subject
         assert result.outcome == "failed"
+
+
+class TestOtpHoldActuator:
+    async def test_rejects_non_number_subject(self) -> None:
+        a = OtpHoldActuator(
+            action="otp.hold_and_alert",
+            url="http://smsc.example/hold",
+            actuator_id="smsc-hold",
+        )
+        result = await a.execute(
+            _decision(subject=Subject(kind=EntityKind.WALLET, id="W:1"))
+        )
+        assert result.outcome == "failed"
+        assert result.error == "not a number subject"
+
+    async def test_posts_hold_request_with_caller_metadata(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured["payload"] = request.content
+            return httpx.Response(200, json={"held": True})
+
+        transport = httpx.MockTransport(_handler)
+        with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+            a = OtpHoldActuator(
+                action="otp.hold_and_alert",
+                url="http://smsc.example/hold",
+                actuator_id="smsc-hold",
+                hold_duration_s=90,
+            )
+            result = await a.execute(
+                _decision(metadata={"caller": "+233207777777", "rule_id": "otp-during-call-tier1"})
+            )
+        assert result.outcome == "executed"
+        body = captured["payload"]
+        assert isinstance(body, (bytes, bytearray))
+        decoded = body.decode()
+        assert "+233207777777" in decoded
+        assert "90" in decoded
 
 
 class TestRegistry:

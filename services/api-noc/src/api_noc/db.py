@@ -130,6 +130,33 @@ class AlertRepo:
             )
         return dict(row) if row else None
 
+    async def list_motif_matches_for_ring(
+        self,
+        *,
+        tenant_id: str,
+        ring_id: UUID,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Alerts whose `details.motif` is set are motif-driven decisions
+        landed on the ring. Lookup is on the JSONB key for cheap discovery
+        without a parallel motif-match table."""
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, type, severity, subject_kind, subject_id, score,
+                       ring_id, status, details, created_at, updated_at
+                  FROM alerts
+                 WHERE tenant_id = $1 AND ring_id = $2
+                   AND (details ? 'motif')
+                 ORDER BY created_at DESC
+                 LIMIT $3
+                """,
+                tenant_id,
+                ring_id,
+                limit,
+            )
+        return [dict(r) for r in rows]
+
     async def close(
         self,
         *,

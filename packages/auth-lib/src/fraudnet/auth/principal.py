@@ -26,6 +26,11 @@ class Role(StrEnum):
     ENTERPRISE_ADMIN = "ENTERPRISE_ADMIN"
     ENTERPRISE_USER = "ENTERPRISE_USER"
 
+    # Group-level — cross-opco / cross-tenant analytics (Phase 4 federation).
+    # Holders see aggregates across all tenants and the group view of
+    # cross-opco rings; never grant casually.
+    GROUP_ADMIN = "GROUP_ADMIN"
+
     # System administration
     SYSTEM_ADMIN = "SYSTEM_ADMIN"
     AUDITOR = "AUDITOR"

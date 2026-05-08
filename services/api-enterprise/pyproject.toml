@@ -1,0 +1,38 @@
+[project]
+name = "api-enterprise"
+version = "0.1.0"
+description = "B2B portal API — tenant-scoped fraud intelligence for external operators and enterprise customers"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "asyncpg>=0.30",
+  "redis>=5.2",
+  "fraudnet-schemas",
+  "fraudnet-obs",
+  "fraudnet-kafka",
+  "fraudnet-audit",
+  "fraudnet-auth",
+  "fraudnet-graph",
+]
+
+[tool.uv.sources]
+fraudnet-schemas = { workspace = true }
+fraudnet-obs = { workspace = true }
+fraudnet-kafka = { workspace = true }
+fraudnet-audit = { workspace = true }
+fraudnet-auth = { workspace = true }
+fraudnet-graph = { workspace = true }
+
+[dependency-groups]
+dev = ["fraudnet-testing", "httpx>=0.28"]
+
+[tool.uv.sources.fraudnet-testing]
+workspace = true
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api_enterprise"]

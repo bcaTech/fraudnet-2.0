@@ -549,6 +549,7 @@ services:
       BRAIN_CONTENT_HOST: 0.0.0.0
       BRAIN_CONTENT_PORT: "8301"
       BRAIN_CONTENT_GROUP: brain-content-dev
+      URL_INTEL_URL: http://url-intel:8312
     command: >
       uv run --package brain-content uvicorn brain_content.main:app
       --host 0.0.0.0 --port 8301 --reload --reload-dir /workspace/services/brain-content
@@ -558,6 +559,32 @@ services:
       schema-registry: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8301/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  url-intel:
+    <<: *app-defaults
+    container_name: fraudnet-url-intel
+    ports: ["8312:8312"]
+    environment:
+      <<: *app-env
+      URL_INTEL_HOST: 0.0.0.0
+      URL_INTEL_PORT: "8312"
+      URL_INTEL_GROUP: url-intel-dev
+      URL_INTEL_REDIS_URL: redis://redis:6379/4
+      URL_INTEL_LISTEN_SIGNALS: "1"
+    command: >
+      uv run --package url-intel uvicorn url_intel.main:app
+      --host 0.0.0.0 --port 8312 --reload --reload-dir /workspace/services/url-intel
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8312/health/live', timeout=2).status==200 else 1)\""]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -656,6 +683,7 @@ services:
       MOMO_FRICTION_URL: http://localhost:9999/momo/friction
       OTP_HOLD_URL: ""
       OTP_HOLD_DURATION_S: "60"
+      URL_INTEL_URL: http://url-intel:8312
       ACTUATOR_TOKEN: dev-actuator-token
     command: >
       uv run --package action-tier1 uvicorn action_tier1.main:app

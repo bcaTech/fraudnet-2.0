@@ -21,6 +21,12 @@ class Settings:
     bad_url_template_hashes: str = ""
     bad_body_hashes: str = ""
 
+    # Optional DNS scanner — when set, brain-content also subscribes to
+    # data.events.v1 and looks each query up against url-intel, emitting
+    # `data.dns_blocklist_hit` signals on hits.
+    url_intel_url: str = ""
+    dns_scanner_timeout_s: float = 0.05
+
     use_model_registry: bool = True
     model_registry_endpoint: str = "http://localhost:9000"
     model_registry_bucket: str = "fraudnet-models"
@@ -44,6 +50,8 @@ class Settings:
             ),
             bad_url_template_hashes=os.environ.get("BRAIN_CONTENT_BAD_TEMPLATE_HASHES", ""),
             bad_body_hashes=os.environ.get("BRAIN_CONTENT_BAD_BODY_HASHES", ""),
+            url_intel_url=os.environ.get("URL_INTEL_URL", ""),
+            dns_scanner_timeout_s=float(os.environ.get("BRAIN_CONTENT_DNS_TIMEOUT_S", "0.05")),
             use_model_registry=os.environ.get("BRAIN_CONTENT_USE_REGISTRY", "1") == "1",
             model_registry_endpoint=os.environ.get(
                 "MODEL_REGISTRY_ENDPOINT", "http://localhost:9000"

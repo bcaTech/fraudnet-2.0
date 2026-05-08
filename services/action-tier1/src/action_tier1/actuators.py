@@ -147,6 +147,103 @@ class UrlBlockActuator(_HttpActuator):
         )
 
 
+class DnsSinkholeActuator(Actuator):
+    """Two-step: register the domain at url-intel, then push to the DNS sinkhole.
+
+    Composes a POST to url-intel `/blocklist/add` (allow-list filtering
+    happens there — `added=False` for allow-listed domains is success from
+    the actuator's perspective) and a POST to the configured DNS resolver
+    block endpoint. Either failure marks the action `failed`.
+    """
+
+    def __init__(
+        self,
+        *,
+        action: str,
+        url_intel_url: str,
+        sinkhole_url: str,
+        actuator_id: str,
+        timeout_s: float = 0.1,
+        token: str | None = None,
+    ) -> None:
+        self.action = action
+        self.actuator_id = actuator_id
+        self._url_intel = url_intel_url.rstrip("/")
+        self._sinkhole = sinkhole_url
+        self._timeout = timeout_s
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    async def execute(self, decision: DecisionDispatchedV1) -> ActuationResult:
+        if decision.subject.kind.value != "url":
+            return ActuationResult(
+                outcome="failed", actuator_id=self.actuator_id, error="not a url subject"
+            )
+        domain = decision.subject.id
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                # 1. Register with url-intel (allow-list-aware).
+                ui_resp = await client.post(
+                    f"{self._url_intel}/blocklist/add",
+                    json={
+                        "domain": domain,
+                        "source": f"action-tier1:{decision.decision_id}",
+                        "category": "phishing",
+                        "confidence": float(decision.score.value) if decision.score else 0.95,
+                    },
+                    headers=self._headers,
+                )
+                if ui_resp.status_code >= 400:
+                    _INVOCATIONS.labels(action=self.action, outcome="failed").inc()
+                    return ActuationResult(
+                        outcome="failed",
+                        actuator_id=self.actuator_id,
+                        error=f"url-intel http {ui_resp.status_code}",
+                    )
+                body = ui_resp.json()
+                # If the domain is allow-listed, url-intel returns added=false
+                # with reason="allow_listed". Treat that as a `suppressed`
+                # outcome — we deliberately did not block.
+                if not body.get("added", False) and body.get("reason") == "allow_listed":
+                    _INVOCATIONS.labels(action=self.action, outcome="suppressed").inc()
+                    return ActuationResult(
+                        outcome="suppressed", actuator_id=self.actuator_id, error="allow_listed"
+                    )
+
+                # 2. Push the (allow-list-filtered) domain to the DNS sinkhole.
+                if not self._sinkhole:
+                    # Dev mode — url-intel registration is enough; the DNS
+                    # resolver pulls /blocklist/export on its own schedule.
+                    _INVOCATIONS.labels(action=self.action, outcome="executed").inc()
+                    return ActuationResult(outcome="executed", actuator_id=self.actuator_id)
+
+                sink_resp = await client.post(
+                    self._sinkhole,
+                    json={
+                        "domain": domain,
+                        "decision_id": decision.decision_id,
+                        "policy_version": decision.policy_version,
+                    },
+                    headers=self._headers,
+                )
+                if sink_resp.status_code >= 400:
+                    _INVOCATIONS.labels(action=self.action, outcome="failed").inc()
+                    return ActuationResult(
+                        outcome="failed",
+                        actuator_id=self.actuator_id,
+                        error=f"sinkhole http {sink_resp.status_code}",
+                    )
+                _INVOCATIONS.labels(action=self.action, outcome="executed").inc()
+                return ActuationResult(outcome="executed", actuator_id=self.actuator_id)
+        except httpx.TimeoutException:
+            _INVOCATIONS.labels(action=self.action, outcome="failed").inc()
+            return ActuationResult(
+                outcome="failed", actuator_id=self.actuator_id, error="timeout"
+            )
+        except Exception as exc:  # noqa: BLE001
+            _INVOCATIONS.labels(action=self.action, outcome="failed").inc()
+            return ActuationResult(outcome="failed", actuator_id=self.actuator_id, error=str(exc))
+
+
 class SmsBlockActuator(_HttpActuator):
     """Outbound SMS block at the SMSC."""
 

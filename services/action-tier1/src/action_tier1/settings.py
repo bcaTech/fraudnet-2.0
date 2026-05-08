@@ -22,6 +22,9 @@ class Settings:
     sms_block_url: str = ""
     momo_friction_url: str = ""
     otp_hold_url: str = ""
+    # When set, url.block routes through DnsSinkholeActuator: post the
+    # domain to url-intel (allow-list aware) and then to the sinkhole URL.
+    url_intel_url: str = ""
     actuator_token: str = ""
 
     actuator_timeout_s: float = 0.1   # 100ms cap for inline budget
@@ -43,6 +46,7 @@ class Settings:
             sms_block_url=os.environ.get("SMS_BLOCK_URL", ""),
             momo_friction_url=os.environ.get("MOMO_FRICTION_URL", ""),
             otp_hold_url=os.environ.get("OTP_HOLD_URL", ""),
+            url_intel_url=os.environ.get("URL_INTEL_URL", ""),
             actuator_token=os.environ.get("ACTUATOR_TOKEN", ""),
             actuator_timeout_s=float(os.environ.get("ACTUATOR_TIMEOUT_S", "0.1")),
             otp_hold_duration_s=int(os.environ.get("OTP_HOLD_DURATION_S", "60")),

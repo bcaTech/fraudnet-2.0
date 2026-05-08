@@ -12,6 +12,8 @@ from fraudnet.schemas.signals import SignalEventV1
 from brain_content.api import router
 from brain_content.classifier import ContentClassifier, HeuristicContentClassifier
 from brain_content.ml_classifier import TfidfLrClassifier
+from brain_content.dns_scanner import DnsScanner
+from brain_content.dns_scanner import make_settings_factory as make_dns_settings_factory
 from brain_content.runner import ContentRunner, make_settings_factory
 from brain_content.settings import Settings
 from brain_content.url_reputation import StaticBlocklist
@@ -83,13 +85,33 @@ def create_app(
         )
         app.state.classifier = classifier_inst
         runner_task = asyncio.create_task(runner.start(), name="content-runner")
-        _log.info("brain_content.started", env=settings.env)
+
+        dns_scanner: DnsScanner | None = None
+        dns_task: asyncio.Task[None] | None = None
+        if settings.url_intel_url:
+            dns_scanner = DnsScanner(
+                url_intel_url=settings.url_intel_url,
+                signal_producer=producer,
+                kafka_settings_factory=make_dns_settings_factory(
+                    bootstrap=settings.kafka_bootstrap_servers,
+                    schema_registry_url=settings.schema_registry_url,
+                    group_id=f"{settings.consumer_group}-dns",
+                ),
+                timeout_s=settings.dns_scanner_timeout_s,
+            )
+            dns_task = asyncio.create_task(dns_scanner.start(), name="content-dns-scanner")
+
+        _log.info("brain_content.started", env=settings.env, dns_scanner=bool(dns_scanner))
         try:
             yield
         finally:
             _log.info("brain_content.stopping")
             await runner.stop()
             runner_task.cancel()
+            if dns_scanner is not None:
+                await dns_scanner.stop()
+            if dns_task is not None:
+                dns_task.cancel()
 
     app = FastAPI(
         title="brain-content",

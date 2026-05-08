@@ -12,6 +12,7 @@ from fraudnet.obs import configure_logging, configure_tracing, get_logger, metri
 from action_tier1.actuators import (
     Actuator,
     ActuatorRegistry,
+    DnsSinkholeActuator,
     MoMoSendWithCareActuator,
     NoopActuator,
     OtpHoldActuator,
@@ -42,9 +43,19 @@ def _build_registry(settings: Settings) -> ActuatorRegistry:
     actuators["volte.tag_suspected_spam"] = make(
         "volte.tag_suspected_spam", settings.volte_tag_url, VolteTagActuator, "ims-core"
     )
-    actuators["url.block"] = make(
-        "url.block", settings.url_block_url, UrlBlockActuator, "dns-sinkhole"
-    )
+    if settings.url_intel_url:
+        actuators["url.block"] = DnsSinkholeActuator(
+            action="url.block",
+            url_intel_url=settings.url_intel_url,
+            sinkhole_url=settings.url_block_url,
+            actuator_id="url-intel+dns-sinkhole",
+            timeout_s=settings.actuator_timeout_s,
+            token=settings.actuator_token or None,
+        )
+    else:
+        actuators["url.block"] = make(
+            "url.block", settings.url_block_url, UrlBlockActuator, "dns-sinkhole"
+        )
     actuators["sms.block"] = make(
         "sms.block", settings.sms_block_url, SmsBlockActuator, "smsc-block"
     )

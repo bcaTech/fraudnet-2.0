@@ -1,0 +1,47 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "IntelEventV1",
+  "doc": "External / customer / peer-telco intel. Adapters normalise vendor formats to this shape.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "kind",
+      "type": {
+        "type": "enum",
+        "name": "IntelEventKind",
+        "symbols": [
+          "customer_report",
+          "peer_telco_share",
+          "gsma_tisac_advisory",
+          "soc_indicator",
+          "blocklist_entry"
+        ]
+      }
+    },
+    {
+      "name": "indicator_kind",
+      "type": {
+        "type": "enum",
+        "name": "EntityKind",
+        "symbols": ["number", "wallet", "device", "account", "url"]
+      }
+    },
+    { "name": "indicator",   "type": "string" },
+    { "name": "confidence",  "type": "double" },
+    { "name": "attribution", "type": ["null", "string"], "default": null },
+    {
+      "name": "severity",
+      "type": [
+        "null",
+        { "type": "enum", "name": "Severity", "symbols": ["critical", "high", "medium", "low"] }
+      ],
+      "default": null
+    },
+    { "name": "notes", "type": ["null", "string"], "default": null }
+  ]
+}

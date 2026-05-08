@@ -5,6 +5,19 @@ description = "FraudNet 2.0 — MTN Ghana network-native fraud intelligence plat
 requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "Proprietary" }
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff>=0.7.4",
+  "mypy>=1.13",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
+  "pre-commit>=4.0",
+  "honcho>=2.0",
+  "testcontainers>=4.8",
+]
 
 [tool.uv.workspace]
 members = [
@@ -60,7 +73,7 @@ disallow_untyped_decorators = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["aerospike.*", "confluent_kafka.*", "gmpy2.*"]
+module = ["aerospike.*", "confluent_kafka.*", "gmpy2.*", "phonenumbers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

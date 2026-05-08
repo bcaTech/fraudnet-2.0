@@ -1,0 +1,41 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "VoiceEventV1",
+  "doc": "Voice signaling event from a network probe (SS7/Diameter/SIP). Vendor-neutral.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "kind",
+      "type": {
+        "type": "enum",
+        "name": "VoiceEventKind",
+        "symbols": ["call_start", "call_end", "registration", "handover"]
+      }
+    },
+    { "name": "caller",       "type": "string" },
+    { "name": "callee",       "type": ["null", "string"], "default": null },
+    { "name": "imsi",         "type": ["null", "string"], "default": null },
+    { "name": "imei",         "type": ["null", "string"], "default": null },
+    { "name": "duration_s",   "type": ["null", "int"],    "default": null },
+    { "name": "cell_id",      "type": ["null", "string"], "default": null },
+    { "name": "location_area_code", "type": ["null", "string"], "default": null },
+    {
+      "name": "network",
+      "type": [
+        "null",
+        { "type": "enum", "name": "VoiceNetwork", "symbols": ["G2", "G3", "G4", "G5", "VoLTE", "VoWiFi"] }
+      ],
+      "default": null
+    },
+    {
+      "name": "vendor_meta",
+      "type": { "type": "map", "values": "string" },
+      "default": {}
+    }
+  ]
+}

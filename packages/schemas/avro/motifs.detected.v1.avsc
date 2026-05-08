@@ -1,0 +1,76 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "MotifDetectedV1",
+  "doc": "A known fraud motif observed in the streaming graph by brain-graph.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "motif",
+      "type": {
+        "type": "enum",
+        "name": "MotifKind",
+        "symbols": [
+          "voice_sms_momo_24h",
+          "mule_chain",
+          "fan_out_collapse",
+          "smishing_burst",
+          "wangiri_loop"
+        ]
+      }
+    },
+    {
+      "name": "members",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "Subject",
+          "fields": [
+            {
+              "name": "kind",
+              "type": {
+                "type": "enum",
+                "name": "MemberKind",
+                "symbols": ["number", "wallet", "device", "account", "url"]
+              }
+            },
+            { "name": "id", "type": "string" }
+          ]
+        }
+      }
+    },
+    { "name": "confidence", "type": "double" },
+    {
+      "name": "score",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "RiskScore",
+          "fields": [
+            { "name": "value", "type": "double" },
+            { "name": "model_id", "type": "string" },
+            { "name": "model_version", "type": "string" },
+            { "name": "computed_at_ms", "type": "long" },
+            {
+              "name": "feature_attribution",
+              "type": ["null", { "type": "map", "values": "double" }],
+              "default": null
+            }
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "evidence",
+      "type": { "type": "map", "values": ["string", "long", "double"] },
+      "default": {}
+    }
+  ]
+}

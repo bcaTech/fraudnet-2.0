@@ -1,0 +1,30 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "AuditEventV1",
+  "doc": "Auditable action. Source of truth for regulator inquiries (CLAUDE.md §7.3).",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "actor_id",     "type": ["null", "string"], "default": null },
+    { "name": "actor_kind",   "type": "string" },
+    { "name": "action",       "type": "string" },
+    { "name": "resource_kind","type": "string" },
+    { "name": "resource_id",  "type": ["null", "string"], "default": null },
+    {
+      "name": "purpose",
+      "type": {
+        "type": "enum",
+        "name": "AuditPurpose",
+        "symbols": ["fraud_prevention", "regulatory_export", "audit", "incident_response"]
+      }
+    },
+    { "name": "request_id", "type": ["null", "string"], "default": null },
+    { "name": "tenant_id",  "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "metadata",
+      "type": { "type": "map", "values": ["string", "long", "double", "boolean"] },
+      "default": {}
+    }
+  ]
+}

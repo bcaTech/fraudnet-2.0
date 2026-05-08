@@ -1,0 +1,33 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "GraphMutationV1",
+  "doc": "Control-topic event for every Memgraph mutation done by stream-graph.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "op",
+      "type": {
+        "type": "enum",
+        "name": "GraphOp",
+        "symbols": ["upsert_node", "upsert_edge", "delete_node", "delete_edge"]
+      }
+    },
+    { "name": "node_kind", "type": ["null", "string"], "default": null },
+    { "name": "node_id",   "type": ["null", "string"], "default": null },
+    { "name": "edge_kind", "type": ["null", "string"], "default": null },
+    { "name": "src_kind",  "type": ["null", "string"], "default": null },
+    { "name": "src_id",    "type": ["null", "string"], "default": null },
+    { "name": "dst_kind",  "type": ["null", "string"], "default": null },
+    { "name": "dst_id",    "type": ["null", "string"], "default": null },
+    {
+      "name": "properties",
+      "type": { "type": "map", "values": ["string", "long", "double", "boolean"] },
+      "default": {}
+    }
+  ]
+}

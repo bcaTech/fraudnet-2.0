@@ -1,0 +1,79 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "DecisionDispatchedV1",
+  "doc": "Resolved decision awaiting actuator pickup by action-tier{1,2,3}.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    { "name": "decision_id",  "type": "string" },
+    {
+      "name": "tier",
+      "type": {
+        "type": "enum",
+        "name": "LatencyTier",
+        "symbols": ["tier1", "tier2", "tier3"]
+      }
+    },
+    { "name": "action", "type": "string" },
+    {
+      "name": "subject",
+      "type": {
+        "type": "record",
+        "name": "DecisionSubject",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "type": "enum",
+              "name": "DecisionSubjectKind",
+              "symbols": ["number", "wallet", "device", "account", "url"]
+            }
+          },
+          { "name": "id", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "severity",
+      "type": {
+        "type": "enum",
+        "name": "DecisionSeverity",
+        "symbols": ["critical", "high", "medium", "low"]
+      }
+    },
+    {
+      "name": "score",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "DecisionRiskScore",
+          "fields": [
+            { "name": "value", "type": "double" },
+            { "name": "model_id", "type": "string" },
+            { "name": "model_version", "type": "string" },
+            { "name": "computed_at_ms", "type": "long" },
+            {
+              "name": "feature_attribution",
+              "type": ["null", { "type": "map", "values": "double" }],
+              "default": null
+            }
+          ]
+        }
+      ],
+      "default": null
+    },
+    { "name": "policy_id", "type": "string" },
+    { "name": "policy_version", "type": "string" },
+    { "name": "suppression_key", "type": ["null", "string"], "default": null },
+    {
+      "name": "metadata",
+      "type": { "type": "map", "values": ["string", "long", "double", "boolean"] },
+      "default": {}
+    }
+  ]
+}

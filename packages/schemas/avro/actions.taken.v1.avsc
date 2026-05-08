@@ -1,0 +1,31 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "ActionTakenV1",
+  "doc": "An action actually executed by an actuator (Tier 1/2/3).",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    { "name": "decision_id",  "type": "string" },
+    { "name": "action",       "type": "string" },
+    {
+      "name": "outcome",
+      "type": {
+        "type": "enum",
+        "name": "ActionOutcome",
+        "symbols": ["executed", "suppressed", "failed", "dry_run"]
+      }
+    },
+    { "name": "latency_ms", "type": ["null", "long"], "default": null },
+    { "name": "actuator_id", "type": ["null", "string"], "default": null },
+    { "name": "error", "type": ["null", "string"], "default": null },
+    {
+      "name": "metadata",
+      "type": { "type": "map", "values": ["string", "long", "double", "boolean"] },
+      "default": {}
+    }
+  ]
+}

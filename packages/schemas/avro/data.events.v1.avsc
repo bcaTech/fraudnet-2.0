@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "DataEventV1",
+  "doc": "DNS resolver / IPDR event. Phase 3+ scope.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "kind",
+      "type": {
+        "type": "enum",
+        "name": "DataEventKind",
+        "symbols": ["dns_query", "dns_response", "ipdr_session"]
+      }
+    },
+    { "name": "msisdn",     "type": ["null", "string"], "default": null },
+    { "name": "domain",     "type": ["null", "string"], "default": null },
+    { "name": "rdata",      "type": ["null", "string"], "default": null },
+    { "name": "bytes_up",   "type": ["null", "long"], "default": null },
+    { "name": "bytes_down", "type": ["null", "long"], "default": null }
+  ]
+}

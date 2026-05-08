@@ -1,0 +1,55 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "MoMoEventV1",
+  "doc": "MoMo wallet event. Partition key is sender_wallet_id when present, else recipient_wallet_id.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "kind",
+      "type": {
+        "type": "enum",
+        "name": "MoMoEventKind",
+        "symbols": [
+          "p2p_transfer",
+          "cash_in",
+          "cash_out",
+          "bill_payment",
+          "merchant_payment",
+          "bank_transfer",
+          "international_remittance",
+          "reversal"
+        ]
+      }
+    },
+    { "name": "txn_id",                  "type": "string" },
+    { "name": "sender_wallet_id",        "type": ["null", "string"], "default": null },
+    { "name": "recipient_wallet_id",     "type": ["null", "string"], "default": null },
+    { "name": "sender_msisdn",           "type": ["null", "string"], "default": null },
+    { "name": "recipient_msisdn",        "type": ["null", "string"], "default": null },
+    { "name": "amount_minor",            "type": "long" },
+    { "name": "currency",                "type": "string" },
+    {
+      "name": "counterparty_kind",
+      "type": {
+        "type": "enum",
+        "name": "MoMoCounterpartyKind",
+        "symbols": ["wallet", "bank", "merchant", "agent", "external"]
+      }
+    },
+    { "name": "counterparty_account_hash", "type": ["null", "string"], "default": null },
+    { "name": "is_reversal_of",            "type": ["null", "string"], "default": null },
+    {
+      "name": "channel",
+      "type": [
+        "null",
+        { "type": "enum", "name": "MoMoChannel", "symbols": ["app", "ussd", "agent", "merchant_pos", "api"] }
+      ],
+      "default": null
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "SmsEventV1",
+  "doc": "SMS event from the SMSC. Body is gated on a fraud_prevention purpose claim.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    {
+      "name": "kind",
+      "type": {
+        "type": "enum",
+        "name": "SmsEventKind",
+        "symbols": ["mt", "mo", "mt_delivery_receipt"]
+      }
+    },
+    { "name": "sender",        "type": "string" },
+    { "name": "recipient",     "type": "string" },
+    { "name": "body",          "type": ["null", "string"], "default": null },
+    { "name": "body_hash",     "type": ["null", "string"], "default": null },
+    { "name": "template_hash", "type": ["null", "string"], "default": null },
+    { "name": "short_code",    "type": ["null", "string"], "default": null },
+    { "name": "smsc_id",       "type": ["null", "string"], "default": null }
+  ]
+}

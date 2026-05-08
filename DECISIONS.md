@@ -74,3 +74,38 @@ The cost is one extra refactor per stream service. The benefit is shipping Phase
 **Why:** Trained model artefacts come from the data science team via the model registry (Phase 2 scope). The interface is fixed; the artefact is swappable.
 
 **Revisit:** When data science delivers the first trained behavioural model — likely month 3-4 of Phase 1.
+
+---
+
+## D-007 — RCS-verified messages are trusted by default
+
+**Decision:** SMS events arriving with `rcs_verified=True` from the SMSC bypass content classification (brain-content short-circuits with no signal) and exempt the sender's MSISDN from `device.imei_churn` in brain-behavioural (via the `rcs_verified_recent` feature bin).
+
+**Why:** RCS Business Messaging authentication is platform-grade — verified senders are cryptographically authenticated by the RCS hub; an attacker cannot trivially forge the verified-sender bit. Treating these as trusted is correct: the signal is stronger than any heuristic / ML score we can derive from the body. IMEI churn is normal for businesses that legitimately rotate SMS-routing infrastructure; flagging them generated false positives in Airtel India's deployment.
+
+**What this affects:**
+- `packages/schemas`: `SmsEventV1.rcs_verified: bool = False`. Avro schema bumped non-breakingly (default false).
+- `services/ingest-sms`: adapter accepts vendor variants (`rcs_verified`, `verified_sender`, `rcs_authenticated`).
+- `services/brain-content`: hard short-circuit — RCS-verified MT SMS does not run the classifier and emits no signal.
+- `services/brain-behavioural`: `device.imei_churn` does not fire when `NumberFeatures.rcs_verified_recent` is true.
+
+**Followup (Phase 2):** stream-features must populate `rcs_verified_recent` on the sender's `NumberFeatures` record from `sms.events.v1`. The feature schema and scorer change land now so the data path can light up without further code changes when stream-features ships the populator.
+
+**Revisit:** If we ever observe spoofed RCS verification (vendor compromise, peer-network leak), revoke the trust override and route RCS-verified messages through the same scoring path as everyone else. The override is gated on the SMSC's outbound integrity, not on FraudNet code.
+
+---
+
+## D-008 — All subscribers are protected by default
+
+**Decision:** Tier-2 customer-facing actions (`spam_call_warning`, `spam_sms_warning`, `otp_fraud_alert`, `url_blocked`, `fraud_alert_sms`) are auto-enabled for every MTN subscriber. The `api-customer` portal becomes an *enhancement* layer (block/unblock self-service, granular control) rather than a *gate* on protection.
+
+**Why:** Airtel India / Africa ship their fraud-alerting service in passive mode by default. Opt-in protection is structurally weaker — the customers most exposed to fraud (older, less digital-native, low-data subscribers) are the least likely to enrol. The MTN Ghana strategy explicitly aims for ubiquitous protection; that requires it to be on without action.
+
+**What this affects:**
+- `services/decisions/policies/default.yaml`: new top-level `passive_protection` block listing the auto-enabled action set.
+- `services/action-tier2`: each customer-facing actuator checks `protection_mode` (default `passive`); active mode unlocks USSD/app channels in addition to SMS.
+- `services/api-customer/README.md`: clarifies the portal is for enhanced control, not activation.
+
+**Channel implication:** Passive mode delivers via SMS only — every MTN handset can receive an SMS, no app/USSD enrolment required. Active mode (registered on api-customer) adds USSD and in-app push.
+
+**Revisit:** If subscriber complaints about unwanted notifications cross a defined threshold (>1 per 1000 alerts/month), introduce a one-tap opt-out via `STOP` reply to a recent fraud-alert SMS.

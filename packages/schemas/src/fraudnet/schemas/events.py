@@ -82,6 +82,12 @@ class SmsEventV1(_EventBase):
     `body` is gated on a regulatory `purpose=fraud_prevention` claim and is
     null otherwise. URL extraction and template clustering happen downstream
     in stream-features and brain-content.
+
+    `rcs_verified` is set when the SMSC push carries RCS metadata
+    indicating the sender is an authenticated business on the RCS
+    Business Messaging registry. RCS verification is platform-grade
+    (not spoofable in normal conditions) so brain-* services treat
+    this as a hard trust override (DECISIONS.md D-007).
     """
 
     topic: ClassVar[str] = "sms.events.v1"
@@ -94,6 +100,7 @@ class SmsEventV1(_EventBase):
     template_hash: str | None = None  # template cluster fingerprint
     short_code: str | None = None
     smsc_id: str | None = None
+    rcs_verified: bool = False  # platform-authenticated RCS sender
 
 
 # ---------------------------------------------------------------------------

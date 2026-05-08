@@ -91,3 +91,23 @@ class TestToSignal:
             source="t",
         )
         assert sig is None
+
+
+class TestRcsExemption:
+    def test_imei_churn_suppressed_when_rcs_verified(self) -> None:
+        nf = NumberFeatures(
+            msisdn="+233231000000",
+            imei_count=8,  # would normally fire
+            rcs_verified_recent=True,
+        )
+        r = HeuristicScorer().score_number(nf)
+        assert r.signal_kind != "device.imei_churn"
+
+    def test_imei_churn_still_fires_without_rcs_verification(self) -> None:
+        nf = NumberFeatures(
+            msisdn="+233241234567",
+            imei_count=8,
+            rcs_verified_recent=False,
+        )
+        r = HeuristicScorer().score_number(nf)
+        assert r.signal_kind == "device.imei_churn"

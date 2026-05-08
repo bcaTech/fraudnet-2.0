@@ -37,6 +37,12 @@ class SmscPushEvent(BaseModel):
     body: str | None = None
     short_code: str | None = None
     smsc_id: str | None = None
+    # RCS Business Messaging metadata. SMSCs that interop with the RCS
+    # platform forward the verified-sender flag here. Vendors disagree
+    # on the field name; the normaliser accepts a few common variants
+    # (verified_sender, rcs_verified, rcs_authenticated) before this
+    # field is set.
+    rcs_verified: bool = False
 
 
 def to_canonical(
@@ -63,6 +69,18 @@ def to_canonical(
     # and surface URL list only when brain-content asks for the body via
     # the audit-gated lookup path.
 
+    # RCS verification: SMSC vendors send this under varying names. The
+    # adapter normalises any of {rcs_verified, verified_sender,
+    # rcs_authenticated} == truthy → rcs_verified=True.
+    rcs_verified = bool(raw.rcs_verified)
+    if not rcs_verified:
+        extra = raw.model_extra or {}
+        for k in ("verified_sender", "rcs_authenticated", "rcs_verified_sender"):
+            v = extra.get(k)
+            if v is True or (isinstance(v, str) and v.lower() in {"true", "1", "yes"}):
+                rcs_verified = True
+                break
+
     return SmsEventV1(
         event_id=event_id or _derive_event_id(raw),
         event_ts_ms=raw.timestamp_ms,
@@ -77,6 +95,7 @@ def to_canonical(
         template_hash=template_hash,
         short_code=raw.short_code,
         smsc_id=raw.smsc_id or smsc_id,
+        rcs_verified=rcs_verified,
     )
 
 

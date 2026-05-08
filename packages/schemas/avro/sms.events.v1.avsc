@@ -23,6 +23,7 @@
     { "name": "body_hash",     "type": ["null", "string"], "default": null },
     { "name": "template_hash", "type": ["null", "string"], "default": null },
     { "name": "short_code",    "type": ["null", "string"], "default": null },
-    { "name": "smsc_id",       "type": ["null", "string"], "default": null }
+    { "name": "smsc_id",       "type": ["null", "string"], "default": null },
+    { "name": "rcs_verified",  "type": "boolean", "default": false }
   ]
 }

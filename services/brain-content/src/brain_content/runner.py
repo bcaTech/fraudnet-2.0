@@ -28,6 +28,16 @@ _VERIFIED_SUPPRESSED = counter(
     "brain_content_verified_short_code_suppressed_total",
     "SMS signals suppressed because the sender short-code is a verified business.",
 )
+_RCS_TRUSTED = counter(
+    "brain_content_rcs_trusted_total",
+    "MT SMS short-circuited via the RCS trust override.",
+)
+
+
+# Hard cap applied to RCS-verified messages — we ignore content analysis
+# entirely (DECISIONS.md D-007). The platform-grade authentication is
+# stronger than any heuristic / ML signal we can derive from the body.
+RCS_TRUSTED_SCORE_CAP = 0.1
 
 
 class ContentRunner:
@@ -68,6 +78,16 @@ class ContentRunner:
         # MO and DR don't carry inbound spam; skip them. MT events are the
         # primary smishing surface.
         if ev.kind != "mt":
+            return
+
+        # RCS trust override — platform-grade authentication wins over
+        # any content heuristic. We do not run the classifier at all.
+        if ev.rcs_verified:
+            _RCS_TRUSTED.inc()
+            _CLASSIFIED.labels(
+                fired="false",
+                with_body=str(ev.body is not None).lower(),
+            ).inc()
             return
 
         # Trust boost: verified short-code senders get their score capped

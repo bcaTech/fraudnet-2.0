@@ -51,6 +51,8 @@ class HeuristicScorer(Scorer):
             "imei_count": f.imei_count,
             "sms_freq_1h": f.sms_freq_1h,
         }
+        if f.rcs_verified_recent:
+            evidence["rcs_verified_recent"] = True
 
         # Voice velocity burst — wangiri / robocall pattern
         if f.velocity_1m >= 10 and f.fanout_1h >= 50:
@@ -61,8 +63,10 @@ class HeuristicScorer(Scorer):
                 evidence=evidence,
             )
 
-        # SIM/IMEI churn — possible compromise
-        if f.imei_count >= 4:
+        # SIM/IMEI churn — possible compromise. RCS-verified senders are
+        # exempt: businesses legitimately rotate SMS-routing infrastructure
+        # (see DECISIONS.md D-007).
+        if f.imei_count >= 4 and not f.rcs_verified_recent:
             return ScoringResult(
                 score=_score(0.78, evidence),
                 signal_kind="device.imei_churn",

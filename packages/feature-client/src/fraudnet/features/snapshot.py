@@ -29,6 +29,11 @@ class NumberFeatures:
     geo_entropy: float = 0.0
     sms_freq_1h: int = 0
     sms_template_top: str | None = None
+    # True when the most recent SMS attributable to this MSISDN as the
+    # *sender* arrived with rcs_verified=True. Populated by stream-features
+    # from sms.events.v1. Brain-behavioural exempts these from IMEI-churn
+    # signals: legitimate businesses rotate SMS-routing infrastructure.
+    rcs_verified_recent: bool = False
     last_score: float | None = None
     last_score_at_ms: int | None = None
 
@@ -44,6 +49,7 @@ class NumberFeatures:
             geo_entropy=float(bins.get("geo_entropy", 0.0)),
             sms_freq_1h=int(bins.get("sms_freq_1h", 0)),
             sms_template_top=bins.get("smshash_top"),
+            rcs_verified_recent=bool(bins.get("rcs_verified", False)),
             last_score=bins.get("last_score"),
             last_score_at_ms=bins.get("last_score_at"),
         )
@@ -58,6 +64,7 @@ class NumberFeatures:
             "geo_entropy": self.geo_entropy,
             "sms_freq_1h": self.sms_freq_1h,
             "smshash_top": self.sms_template_top,
+            "rcs_verified": self.rcs_verified_recent,
             "last_score": self.last_score,
             "last_score_at": self.last_score_at_ms,
         }

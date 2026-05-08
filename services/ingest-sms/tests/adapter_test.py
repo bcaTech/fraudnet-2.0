@@ -65,3 +65,36 @@ class TestSmsAdapter:
             allow_body_capture=False,
         )
         assert ev.smsc_id == "from-settings"
+
+
+class TestRcsVerified:
+    def test_rcs_verified_default_false(self) -> None:
+        ev = to_canonical(_push(), source="t", smsc_id="t", allow_body_capture=False)
+        assert ev.rcs_verified is False
+
+    def test_rcs_verified_explicit_true(self) -> None:
+        ev = to_canonical(
+            _push(rcs_verified=True),
+            source="t",
+            smsc_id="t",
+            allow_body_capture=False,
+        )
+        assert ev.rcs_verified is True
+
+    def test_rcs_verified_normalises_vendor_aliases(self) -> None:
+        ev = to_canonical(
+            _push(verified_sender=True),
+            source="t",
+            smsc_id="t",
+            allow_body_capture=False,
+        )
+        assert ev.rcs_verified is True
+
+    def test_rcs_verified_normalises_string_truthy(self) -> None:
+        ev = to_canonical(
+            _push(rcs_authenticated="true"),
+            source="t",
+            smsc_id="t",
+            allow_body_capture=False,
+        )
+        assert ev.rcs_verified is True

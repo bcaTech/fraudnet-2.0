@@ -1,0 +1,23 @@
+[project]
+name = "fraudnet-auth"
+version = "0.1.0"
+description = "JWT validation, RBAC, tenant scoping, step-up auth"
+requires-python = ">=3.12"
+dependencies = [
+  "pyjwt[crypto]>=2.10",
+  "httpx>=0.28",
+  "fastapi>=0.115",
+  "fraudnet-schemas",
+  "fraudnet-obs",
+]
+
+[tool.uv.sources]
+fraudnet-schemas = { workspace = true }
+fraudnet-obs = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fraudnet"]

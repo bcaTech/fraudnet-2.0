@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from fraudnet.obs import configure_logging, configure_tracing, get_logger
 from compliance.api import router
+from compliance.archive import ArchiveScheduler, IcebergArchiver, settings_from_env
 from compliance.runner import ComplianceRunner, make_settings_factory
 from compliance.settings import Settings
 from compliance.store import AuditStore
@@ -41,12 +42,47 @@ def create_app(
         )
         app.state.store = store
         app.state.runner = runner
+
+        archive_cfg = settings_from_env()
+        archive_scheduler: ArchiveScheduler | None = None
+        archive_task: asyncio.Task[None] | None = None
+        if archive_cfg["enabled"]:
+            try:
+                archiver = IcebergArchiver(
+                    pool=store.pool,
+                    bucket=archive_cfg["bucket"],
+                    endpoint_url=archive_cfg["endpoint_url"],
+                    access_key=archive_cfg["access_key"],
+                    secret_key=archive_cfg["secret_key"],
+                )
+                archive_scheduler = ArchiveScheduler(
+                    archiver=archiver,
+                    retention_days=archive_cfg["retention_days"],
+                    interval_s=archive_cfg["interval_s"],
+                )
+                app.state.archiver = archiver
+                app.state.archive_scheduler = archive_scheduler
+                archive_task = asyncio.create_task(
+                    archive_scheduler.start(), name="compliance-archive"
+                )
+                _log.info(
+                    "compliance.archive_enabled",
+                    retention_days=archive_cfg["retention_days"],
+                    interval_s=archive_cfg["interval_s"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("compliance.archive_init_failed", error=str(exc))
+
         runner_task = asyncio.create_task(runner.start(), name="compliance-runner")
         _log.info("compliance.started", env=settings.env)
         try:
             yield
         finally:
             _log.info("compliance.stopping")
+            if archive_scheduler is not None:
+                await archive_scheduler.stop()
+            if archive_task is not None:
+                archive_task.cancel()
             await runner.stop()
             runner_task.cancel()
 

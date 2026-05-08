@@ -36,6 +36,12 @@ class AuditStore:
         if self._pool is not None:
             await self._pool.close()
 
+    @property
+    def pool(self) -> asyncpg.Pool:
+        if self._pool is None:
+            raise RuntimeError("AuditStore not connected")
+        return self._pool
+
     async def write_audit_event(self, ev: AuditEventV1) -> None:
         if self._pool is None:
             raise RuntimeError("AuditStore not connected")

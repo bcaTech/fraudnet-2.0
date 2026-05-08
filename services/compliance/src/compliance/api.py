@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 
 from fraudnet.obs import get_logger, metrics_endpoint
+from compliance.archive import ArchiveScheduler, IcebergArchiver
 from compliance.store import AuditStore
 
 _log = get_logger("compliance.api")
@@ -21,6 +22,14 @@ _log = get_logger("compliance.api")
 
 def _store(request: Request) -> AuditStore:
     return request.app.state.store  # type: ignore[no-any-return]
+
+
+def _archiver(request: Request) -> IcebergArchiver | None:
+    return getattr(request.app.state, "archiver", None)
+
+
+def _archive_scheduler(request: Request) -> ArchiveScheduler | None:
+    return getattr(request.app.state, "archive_scheduler", None)
 
 
 router = APIRouter()
@@ -91,6 +100,55 @@ async def export_ndjson(
             yield (json.dumps(_to_jsonable(r), default=str) + "\n").encode()
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+@router.get("/audit/archived")
+async def audit_archived(
+    archiver: Annotated[IcebergArchiver | None, Depends(_archiver)],
+) -> dict[str, Any]:
+    """Months that have been archived to the lakehouse and detached from
+    the live audit_events table."""
+    if archiver is None:
+        return {"enabled": False, "archived": []}
+    rows = await archiver.list_archived()
+    return {
+        "enabled": True,
+        "archived": [
+            {
+                "table_name": r.table_name,
+                "year": r.year,
+                "month": r.month,
+                "rows_archived": r.rows_archived,
+                "object_key": r.object_key,
+                "sha256": r.sha256,
+                "archived_at_ms": r.archived_at_ms,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/audit/archive/trigger")
+async def audit_archive_trigger(
+    scheduler: Annotated[ArchiveScheduler | None, Depends(_archive_scheduler)],
+) -> dict[str, Any]:
+    """Force an archive pass now. Returns the partitions newly archived."""
+    if scheduler is None:
+        return {"status": "no_scheduler"}
+    archived = await scheduler.trigger()
+    return {
+        "status": "ok",
+        "newly_archived": [
+            {
+                "table_name": r.table_name,
+                "year": r.year,
+                "month": r.month,
+                "rows_archived": r.rows_archived,
+                "object_key": r.object_key,
+            }
+            for r in archived
+        ],
+    }
 
 
 def _to_jsonable(row: dict[str, Any]) -> dict[str, Any]:

@@ -26,6 +26,9 @@ class Settings:
     graph_buffer_max: int = 1000
     graph_flush_interval_s: float = 5.0
 
+    # 'standalone' (in-process Memgraph batch writer) | 'cluster' (PyFlink job).
+    flink_mode: str = "standalone"
+
     health_host: str = "0.0.0.0"  # noqa: S104
     health_port: int = 8111
 
@@ -42,6 +45,7 @@ class Settings:
             memgraph_password=os.environ.get("MEMGRAPH_PASSWORD", ""),
             graph_buffer_max=int(os.environ.get("GRAPH_BUFFER_MAX", "1000")),
             graph_flush_interval_s=float(os.environ.get("GRAPH_FLUSH_INTERVAL_S", "5.0")),
+            flink_mode=os.environ.get("FLINK_MODE", "standalone"),
             health_host=os.environ.get("STREAM_GRAPH_HEALTH_HOST", "0.0.0.0"),  # noqa: S104
             health_port=int(os.environ.get("STREAM_GRAPH_HEALTH_PORT", "8111")),
         )

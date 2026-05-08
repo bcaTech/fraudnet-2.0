@@ -24,6 +24,15 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
+        app.state.flink_mode = settings.flink_mode
+
+        if settings.flink_mode == "cluster":
+            _log.info("stream_graph.started", env=settings.env, mode="cluster")
+            try:
+                yield
+            finally:
+                _log.info("stream_graph.stopping")
+            return
 
         graph_client = GraphClient(
             bolt_url=settings.memgraph_url,
@@ -78,10 +87,12 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health/ready", include_in_schema=False)
     async def readiness() -> dict[str, str]:
+        if settings.flink_mode == "cluster":
+            return {"status": "ready", "service": settings.service_name, "mode": "cluster"}
         runner = getattr(app.state, "runner", None)
         if runner is None:
             return {"status": "starting"}
-        return {"status": "ready", "service": settings.service_name}
+        return {"status": "ready", "service": settings.service_name, "mode": "standalone"}
 
     @app.get("/metrics", include_in_schema=False)
     async def metrics() -> Response:

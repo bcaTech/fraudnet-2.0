@@ -1,0 +1,40 @@
+# FraudNet 2.0 codeowners
+# Two-engineer review; at least one must be on the affected service team.
+
+# Default — platform team
+*                                @mtn-ghana/platform
+
+# Per-service teams
+/services/ingest-voice/          @mtn-ghana/ingestion @mtn-ghana/network
+/services/ingest-sms/            @mtn-ghana/ingestion
+/services/ingest-data/           @mtn-ghana/ingestion @mtn-ghana/network
+/services/ingest-momo/           @mtn-ghana/momo @mtn-ghana/ingestion
+/services/ingest-intel/          @mtn-ghana/threat-intel
+
+/services/stream-features/       @mtn-ghana/streaming
+/services/stream-graph/          @mtn-ghana/streaming @mtn-ghana/graph
+
+/services/brain-behavioural/     @mtn-ghana/data-science
+/services/brain-content/         @mtn-ghana/data-science
+/services/brain-graph/           @mtn-ghana/data-science @mtn-ghana/graph
+
+/services/decisions/             @mtn-ghana/decisions
+/services/action-tier1/          @mtn-ghana/decisions @mtn-ghana/network
+/services/action-tier2/          @mtn-ghana/decisions
+/services/action-tier3/          @mtn-ghana/decisions @mtn-ghana/noc
+
+/services/api-noc/               @mtn-ghana/noc
+/services/api-customer/          @mtn-ghana/customer-experience
+/services/api-enterprise/        @mtn-ghana/enterprise
+/services/api-admin/             @mtn-ghana/platform
+/services/api-public/            @mtn-ghana/platform
+
+/services/compliance/            @mtn-ghana/dpo @mtn-ghana/compliance
+/services/feedback/              @mtn-ghana/data-science
+
+/packages/                       @mtn-ghana/platform
+/packages/auth-lib/              @mtn-ghana/security @mtn-ghana/platform
+/packages/audit-lib/             @mtn-ghana/dpo @mtn-ghana/security
+
+/infra/                          @mtn-ghana/platform @mtn-ghana/sre
+/docs/adrs/                      @mtn-ghana/architecture

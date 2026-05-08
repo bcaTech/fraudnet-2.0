@@ -1,0 +1,3 @@
+# action-tier2
+
+Scaffolded. See `CLAUDE.md` §5 for the contract.

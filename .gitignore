@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+.tox/
+dist/
+build/
+
+# Node
+node_modules/
+.turbo/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Env / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+.secrets/
+
+# Local data
+data/
+volumes/
+*.db
+*.sqlite
+
+# Docker overrides
+docker-compose.override.yml
+
+# Build artefacts
+*.log
+*.pid
+*.seed
+.cache/
+
+# Generated proto / avro
+*_pb2.py
+*_pb2.pyi
+*_pb2_grpc.py
+generated/

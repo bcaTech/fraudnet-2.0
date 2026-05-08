@@ -1,0 +1,12 @@
+api-public:    uv run --package api-public uvicorn api_public.main:app --reload --port 8000
+api-noc:       uv run --package api-noc uvicorn api_noc.main:app --reload --port 8010
+api-customer:  uv run --package api-customer uvicorn api_customer.main:app --reload --port 8011
+api-admin:     uv run --package api-admin uvicorn api_admin.main:app --reload --port 8012
+ingest-momo:   uv run --package ingest-momo python -m ingest_momo.main
+ingest-voice:  uv run --package ingest-voice python -m ingest_voice.main
+ingest-sms:    uv run --package ingest-sms python -m ingest_sms.main
+decisions:     uv run --package decisions python -m decisions.main
+action-tier1:  uv run --package action-tier1 python -m action_tier1.main
+action-tier2:  uv run --package action-tier2 python -m action_tier2.main
+compliance:    uv run --package compliance python -m compliance.main
+feedback:      uv run --package feedback python -m feedback.main

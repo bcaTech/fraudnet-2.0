@@ -1,0 +1,84 @@
+[project]
+name = "fraudnet-backend"
+version = "0.1.0"
+description = "FraudNet 2.0 — MTN Ghana network-native fraud intelligence platform"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "Proprietary" }
+
+[tool.uv.workspace]
+members = [
+  "services/*",
+  "packages/*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages", "services"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W",      # pycodestyle, pyflakes
+  "I",                # isort
+  "B",                # flake8-bugbear
+  "UP",               # pyupgrade
+  "N",                # pep8-naming
+  "ANN",              # flake8-annotations
+  "ASYNC",            # flake8-async
+  "S",                # flake8-bandit
+  "RUF",              # ruff-specific
+  "PL",               # pylint
+  "TID",              # flake8-tidy-imports
+  "G",                # flake8-logging-format
+  "PIE",              # flake8-pie
+  "SIM",              # flake8-simplify
+]
+ignore = [
+  "ANN401",   # Allow Any in **kwargs
+  "PLR0913",  # Too many arguments — FastAPI deps legitimately exceed
+  "S101",     # Allow assert in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*_test.py" = ["S101", "PLR2004", "ANN"]
+"tests/**" = ["S101", "PLR2004", "ANN"]
+"tools/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fraudnet"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_decorators = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["aerospike.*", "confluent_kafka.*", "gmpy2.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "services"]
+python_files = ["*_test.py"]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"
+markers = [
+  "integration: integration tests requiring Docker services",
+  "load: load tests, run nightly only",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["packages", "services"]
+omit = ["*/tests/*", "*_test.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 75

@@ -17,6 +17,11 @@ dev = [
   "pre-commit>=4.0",
   "honcho>=2.0",
   "testcontainers>=4.8",
+  "pyyaml>=6.0",                 # used by scripts/create_topics.py
+  "confluent-kafka>=2.6",        # used by scripts/create_topics.py + e2e tests
+  "asyncpg>=0.30",               # used by scripts/seed_demo.py
+  "neo4j>=5.27",                 # used by scripts/seed_demo.py (Memgraph driver)
+  "aerospike>=15.0",             # used by scripts/seed_demo.py
 ]
 
 [tool.uv.workspace]

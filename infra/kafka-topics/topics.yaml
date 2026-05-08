@@ -49,11 +49,33 @@ topics:
     config:
       retention.ms: 7776000000         # 90d
 
-  # ---- Decisions and actions ----
-  - name: decisions.dispatched.v1
+  # ---- Brain → Decisions ----
+  - name: fraud.signals.v1
     partitions: 50
     config:
       retention.ms: 2592000000         # 30d
+
+  # ---- Decisions and actions ----
+  - name: decisions.dispatched.v1     # audit-trail of every decision
+    partitions: 50
+    config:
+      retention.ms: 2592000000         # 30d
+
+  - name: action.tier1.v1              # inline (VoLTE tag, URL block, MoMo friction)
+    partitions: 50
+    config:
+      retention.ms: 1209600000         # 14d
+      max.message.bytes: "65536"
+
+  - name: action.tier2.v1              # near-real-time (alerts, prompts, SOC tickets)
+    partitions: 30
+    config:
+      retention.ms: 2592000000         # 30d
+
+  - name: action.tier3.v1              # NOC investigation queue
+    partitions: 10
+    config:
+      retention.ms: 7776000000         # 90d
 
   - name: actions.taken.v1
     partitions: 20

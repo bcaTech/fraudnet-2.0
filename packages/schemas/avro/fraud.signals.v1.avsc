@@ -1,0 +1,64 @@
+{
+  "type": "record",
+  "namespace": "gh.mtn.fraudnet.events",
+  "name": "SignalEventV1",
+  "doc": "Async-scored fraud signal from brain-* services. Consumed by decisions.",
+  "fields": [
+    { "name": "event_id",     "type": "string" },
+    { "name": "event_ts_ms",  "type": "long" },
+    { "name": "ingest_ts_ms", "type": "long" },
+    { "name": "source",       "type": "string" },
+    { "name": "tenant_id",    "type": "string", "default": "mtn-ghana" },
+    { "name": "signal_kind",  "type": "string" },
+    {
+      "name": "subject",
+      "type": {
+        "type": "record",
+        "name": "SignalSubject",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "type": "enum",
+              "name": "SignalSubjectKind",
+              "symbols": ["number", "wallet", "device", "account", "url"]
+            }
+          },
+          { "name": "id", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "score",
+      "type": {
+        "type": "record",
+        "name": "SignalRiskScore",
+        "fields": [
+          { "name": "value", "type": "double" },
+          { "name": "model_id", "type": "string" },
+          { "name": "model_version", "type": "string" },
+          { "name": "computed_at_ms", "type": "long" },
+          {
+            "name": "feature_attribution",
+            "type": ["null", { "type": "map", "values": "double" }],
+            "default": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "severity",
+      "type": {
+        "type": "enum",
+        "name": "SignalSeverity",
+        "symbols": ["critical", "high", "medium", "low"]
+      }
+    },
+    {
+      "name": "evidence",
+      "type": { "type": "map", "values": ["string", "long", "double", "boolean"] },
+      "default": {}
+    },
+    { "name": "suppression_key", "type": ["null", "string"], "default": null }
+  ]
+}

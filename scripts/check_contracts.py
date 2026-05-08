@@ -24,7 +24,11 @@ EXPECTED_TOPICS_V1 = {
     "intel.events",
     "graph.mutations",
     "motifs.detected",
+    "fraud.signals",
     "decisions.dispatched",
+    "action.tier1",
+    "action.tier2",
+    "action.tier3",
     "actions.taken",
     "audit.events",
 }

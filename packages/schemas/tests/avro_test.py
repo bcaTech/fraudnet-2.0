@@ -13,7 +13,11 @@ EXPECTED_TOPICS = {
     "intel.events.v1",
     "graph.mutations.v1",
     "motifs.detected.v1",
+    "fraud.signals.v1",
     "decisions.dispatched.v1",
+    "action.tier1.v1",
+    "action.tier2.v1",
+    "action.tier3.v1",
     "actions.taken.v1",
     "audit.events.v1",
 }
@@ -51,3 +55,13 @@ def test_event_envelope_fields_present_on_event_topics() -> None:
         names = {f["name"] for f in schema["fields"]}
         missing = envelope - names
         assert not missing, f"{path.name}: missing envelope fields {missing}"
+
+
+def test_per_tier_action_topics_share_decision_dispatched_shape() -> None:
+    """action.tier{1,2,3}.v1 are subjects carrying the DecisionDispatchedV1
+    payload — see DECISIONS.md D-003. Verify they're identical to the
+    decisions.dispatched.v1 schema."""
+    base = json.loads((AVRO_DIR / "decisions.dispatched.v1.avsc").read_text())
+    for tier in ("action.tier1.v1", "action.tier2.v1", "action.tier3.v1"):
+        s = json.loads((AVRO_DIR / f"{tier}.avsc").read_text())
+        assert s == base, f"{tier} schema must match decisions.dispatched.v1"

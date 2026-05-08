@@ -468,6 +468,34 @@ services:
       retries: 5
       start_period: 30s
 
+  ingest-data:
+    <<: *app-defaults
+    container_name: fraudnet-ingest-data
+    ports: ["8103:8103"]
+    environment:
+      <<: *app-env
+      REDIS_URL: redis://redis:6379/3
+      INGEST_DATA_HOST: 0.0.0.0
+      INGEST_DATA_PORT: "8103"
+      DATA_DNS_WEBHOOK_SHARED_SECRET: dev-dns-secret
+      DATA_IPDR_WEBHOOK_SHARED_SECRET: dev-ipdr-secret
+      DATA_DNS_RESOLVER_ID: dev-resolver
+      DATA_IPDR_COLLECTOR_ID: dev-ipdr
+    command: >
+      uv run --package ingest-data uvicorn ingest_data.main:app
+      --host 0.0.0.0 --port 8103 --reload --reload-dir /workspace/services/ingest-data
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8103/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   # ---- Stream processing (Layer 2) ------------------------------------------
   # Pure-Python consumers in Phase 1 (DECISIONS.md D-002). Phase 2 promotes to
   # PyFlink on the Flink Kubernetes Operator.

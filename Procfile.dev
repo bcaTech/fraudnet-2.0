@@ -5,6 +5,7 @@ api-admin:     uv run --package api-admin uvicorn api_admin.main:app --reload --
 ingest-momo:   uv run --package ingest-momo python -m ingest_momo.main
 ingest-voice:  uv run --package ingest-voice python -m ingest_voice.main
 ingest-sms:    uv run --package ingest-sms python -m ingest_sms.main
+ingest-data:   uv run --package ingest-data python -m ingest_data.main
 decisions:     uv run --package decisions python -m decisions.main
 brain-graph:   uv run --package brain-graph uvicorn brain_graph.main:app --reload --port 8302
 action-tier1:  uv run --package action-tier1 python -m action_tier1.main

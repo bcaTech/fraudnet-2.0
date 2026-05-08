@@ -18,6 +18,10 @@ from action_tier2.actuators import (
     SafeguardEnrollActuator,
 )
 from action_tier2.locale import StaticLocaleResolver, SubscriberLocaleResolver
+from action_tier2.protection import (
+    ProtectionModeResolver,
+    StaticProtectionModeResolver,
+)
 from action_tier2.runner import Tier2Runner, make_settings_factory
 from action_tier2.settings import Settings
 
@@ -127,6 +131,9 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
+        protection_resolver: ProtectionModeResolver = StaticProtectionModeResolver(
+            default=settings.default_protection_mode  # type: ignore[arg-type]
+        )
         runner = Tier2Runner(
             registry=registry,
             kafka_settings_factory=make_settings_factory(
@@ -134,6 +141,7 @@ def create_app(
                 schema_registry_url=settings.schema_registry_url,
                 group_id=settings.consumer_group,
             ),
+            protection_resolver=protection_resolver,
         )
         app.state.registry = registry
         app.state.runner = runner

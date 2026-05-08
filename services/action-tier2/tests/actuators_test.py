@@ -154,3 +154,41 @@ async def test_customer_alert_falls_back_to_english_for_unmapped_msisdn() -> Non
         await a.execute(_decision("customer.alert_smishing", EntityKind.NUMBER, "+233242222222"))
         body = json.loads(captured["body"])
         assert body["locale"] == "en"
+
+
+from action_tier2.protection import (
+    ACTIVE_MODE_ONLY,
+    HIGH_SEVERITY_ONLY,
+    PASSIVE_AUTO_ENROLLED,
+    is_action_allowed,
+)
+
+
+class TestProtectionGate:
+    def test_active_mode_allows_everything(self) -> None:
+        for action in (
+            "customer.alert_smishing",
+            "customer.alert_fraud",
+            "customer.do_i_know_you_prompt",
+            "customer.ask_me_first",
+        ):
+            assert is_action_allowed(action, mode="active", severity="low") is True
+
+    def test_passive_allows_auto_enrolled(self) -> None:
+        for action in PASSIVE_AUTO_ENROLLED:
+            assert is_action_allowed(action, mode="passive", severity="low") is True
+
+    def test_passive_blocks_active_only(self) -> None:
+        for action in ACTIVE_MODE_ONLY:
+            assert is_action_allowed(action, mode="passive", severity="critical") is False
+
+    def test_passive_high_severity_only_gates_on_severity(self) -> None:
+        for action in HIGH_SEVERITY_ONLY:
+            assert is_action_allowed(action, mode="passive", severity="critical") is True
+            assert is_action_allowed(action, mode="passive", severity="high") is True
+            assert is_action_allowed(action, mode="passive", severity="medium") is False
+            assert is_action_allowed(action, mode="passive", severity="low") is False
+
+    def test_unrelated_actions_pass(self) -> None:
+        # Wallet / non-customer-facing actions should pass through.
+        assert is_action_allowed("momo.review_wallet_kyc", mode="passive", severity="low") is True

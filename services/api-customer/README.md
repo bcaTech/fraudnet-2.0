@@ -2,6 +2,17 @@
 
 Customer self-service API. MSISDN-OTP authentication; tenant-of-one (each customer is their own tenant in `mtn-ghana`). Per CLAUDE.md §5.5.
 
+## Protection model
+
+**Protection is on by default for every MTN subscriber.** The `api-customer` portal is an *enhancement layer* — not a gate on protection (DECISIONS.md D-008).
+
+| Mode | Default? | Channels | Coverage |
+|---|---|---|---|
+| `passive` | Yes — every subscriber | SMS only | Spam-call/SMS warnings, OTP-fraud alert, URL-block notice, high-severity fraud alerts |
+| `active` | Opt-in via portal | SMS + USSD + app push + self-service | Everything in `passive` plus Do-I-Know-You prompts, Ask-Me-First MoMo confirmation, MoMo limit reviews, SafeGuard auto-enrol |
+
+The Tier-2 runner enforces this with `is_action_allowed(action, mode, severity)` before dispatching any actuator. Passive subscribers cannot be over-notified; active subscribers can opt back to passive at any time via the portal.
+
 ## Endpoints
 
 | Method | Path | Auth | Purpose |

@@ -140,6 +140,10 @@ class CustomerSmsAlertActuator(_HttpActuator):
         locale = await self._resolve_locale(msisdn)
         template_key = _ALERT_TEMPLATE_KEY.get(decision.action, "fraud_alert")
         body = translate(template_key, locale=locale)
+        # The runner has already gated on protection-mode; here we only
+        # surface the mode in the payload so the SMS gateway can choose
+        # the right delivery channel (passive = SMS only; active may
+        # also push via app/USSD).
         return await self._post(
             {
                 "msisdn": msisdn,
@@ -149,6 +153,7 @@ class CustomerSmsAlertActuator(_HttpActuator):
                 "locale": locale,
                 "template_key": template_key,
                 "body": body,
+                "protection_mode": str(decision.metadata.get("protection_mode") or "passive"),
             }
         )
 

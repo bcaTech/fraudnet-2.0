@@ -105,3 +105,28 @@ default:
   action: investigation.queue
   tier: tier3
   suppression_window_s: 0
+
+# Passive protection — the set of customer-facing actions that are
+# auto-enabled for every MTN subscriber, with no opt-in required.
+# Protection is on by default; the api-customer portal layers on
+# enhanced control (USSD, app push, granular block/unblock).
+# See DECISIONS.md D-008.
+passive_protection:
+  enabled: true
+  auto_enrolled_actions:
+    - customer.alert_smishing
+    - customer.alert_spam_call
+    - customer.alert_otp_fraud
+    - customer.alert_url_blocked
+  # Actions that fire only on high-severity signals in passive mode —
+  # we don't want to noisify subscribers with low-severity alerts unless
+  # they have explicitly enrolled (active mode).
+  high_severity_only:
+    - customer.alert_fraud
+  # Active-mode-only — these require an enrolled subscriber profile
+  # (USSD enrolment, app install). Passive subscribers don't see them.
+  active_mode_only:
+    - customer.do_i_know_you_prompt
+    - customer.ask_me_first
+    - momo.review_limit
+    - safeguard.enroll

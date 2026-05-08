@@ -27,6 +27,11 @@ class Settings:
     # Locale fallback for subscribers without a profile-stored preference.
     default_locale: str = "en"
 
+    # Protection-mode fallback for subscribers without a profile entry.
+    # 'passive' = SMS-only, no opt-in required (DECISIONS.md D-008).
+    # 'active' = SMS + USSD + app push; for portal-registered subscribers.
+    default_protection_mode: str = "passive"
+
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8202
 
@@ -45,6 +50,7 @@ class Settings:
             actuator_token=os.environ.get("ACTUATOR_TOKEN", ""),
             actuator_timeout_s=float(os.environ.get("ACTUATOR_TIMEOUT_S", "2.0")),
             default_locale=os.environ.get("FRAUDNET_DEFAULT_LOCALE", "en"),
+            default_protection_mode=os.environ.get("FRAUDNET_DEFAULT_PROTECTION_MODE", "passive"),
             host=os.environ.get("ACTION_TIER2_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("ACTION_TIER2_PORT", "8202")),
         )

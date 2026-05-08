@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from brain_content.classifier import HeuristicContentClassifier, to_signal
+from brain_content.ott_domain_analysis import OttDomainAnalyser
 from brain_content.url_reputation import StaticBlocklist
 
 
@@ -9,11 +10,13 @@ def _classifier(
     bad_domains: set[str] = frozenset(),
     bad_template_hashes: set[str] = frozenset(),
     bad_body_hashes: set[str] = frozenset(),
+    ott_analyser: OttDomainAnalyser | None = None,
 ) -> HeuristicContentClassifier:
     return HeuristicContentClassifier(
         url_reputation=StaticBlocklist(bad_domains=bad_domains),
         bad_template_hashes=bad_template_hashes,
         bad_body_hashes=bad_body_hashes,
+        ott_analyser=ott_analyser,
     )
 
 
@@ -76,6 +79,39 @@ class TestKeywordPath:
             template_hash=None,
         )
         assert r.signal_kind is None
+
+
+class TestOttPath:
+    def test_brand_lookalike_url_fires_high(self) -> None:
+        c = _classifier(ott_analyser=OttDomainAnalyser())
+        r = c.classify(
+            body="Verify your wallet at https://mtnmomo-secure.attacker.com/login",
+            body_hash=None,
+            template_hash=None,
+        )
+        assert r.signal_kind == "sms.ott_lookalike"
+        assert r.severity.value == "high"
+        assert r.evidence.get("brand_lookalike") is True
+
+    def test_url_shortener_alone_fires_medium(self) -> None:
+        c = _classifier(ott_analyser=OttDomainAnalyser())
+        r = c.classify(
+            body="Check https://bit.ly/abc123",
+            body_hash=None,
+            template_hash=None,
+        )
+        assert r.signal_kind == "sms.url_shortener_abuse"
+        assert r.severity.value == "medium"
+
+    def test_legitimate_mtn_url_does_not_fire_ott(self) -> None:
+        c = _classifier(ott_analyser=OttDomainAnalyser())
+        r = c.classify(
+            body="Visit https://www.mtn.com.gh/account",
+            body_hash=None,
+            template_hash=None,
+        )
+        # No OTT lookalike, no rep hit, no keyword threshold.
+        assert r.signal_kind not in {"sms.ott_lookalike", "sms.url_shortener_abuse"}
 
 
 def test_to_signal_with_suppression_key() -> None:

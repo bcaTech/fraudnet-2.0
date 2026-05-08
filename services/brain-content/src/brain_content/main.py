@@ -14,6 +14,7 @@ from brain_content.classifier import ContentClassifier, HeuristicContentClassifi
 from brain_content.ml_classifier import TfidfLrClassifier
 from brain_content.dns_scanner import DnsScanner
 from brain_content.dns_scanner import make_settings_factory as make_dns_settings_factory
+from brain_content.ott_domain_analysis import OttDomainAnalyser
 from brain_content.runner import ContentRunner, make_settings_factory
 from brain_content.settings import Settings
 from brain_content.url_reputation import StaticBlocklist
@@ -26,12 +27,15 @@ from business_registry.client import (
 _log = get_logger("brain_content.main")
 
 
-def _build_classifier(settings: Settings) -> ContentClassifier:
+def _build_classifier(
+    settings: Settings, *, ott_analyser: OttDomainAnalyser | None = None
+) -> ContentClassifier:
     blocklist = StaticBlocklist(bad_domains=settings.parse_list("bad_domains"))
     heuristic = HeuristicContentClassifier(
         url_reputation=blocklist,
         bad_template_hashes=settings.parse_list("bad_url_template_hashes"),
         bad_body_hashes=settings.parse_list("bad_body_hashes"),
+        ott_analyser=ott_analyser,
     )
     if not settings.use_model_registry:
         return heuristic
@@ -68,7 +72,11 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
-        classifier_inst = _build_classifier(settings)
+        # One shared OttDomainAnalyser per process — its FirstSeenTracker
+        # is the per-process NRD memory and the suspicious_domains set is
+        # exposed for stream-features to subscribe to.
+        ott_analyser = OttDomainAnalyser()
+        classifier_inst = _build_classifier(settings, ott_analyser=ott_analyser)
         kafka_settings = KafkaSettings(
             bootstrap_servers=settings.kafka_bootstrap_servers,
             schema_registry_url=settings.schema_registry_url,
@@ -112,6 +120,7 @@ def create_app(
                     group_id=f"{settings.consumer_group}-dns",
                 ),
                 timeout_s=settings.dns_scanner_timeout_s,
+                ott_analyser=ott_analyser,
             )
             dns_task = asyncio.create_task(dns_scanner.start(), name="content-dns-scanner")
 

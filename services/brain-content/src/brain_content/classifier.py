@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from fraudnet.schemas.signals import SignalEventV1
 from fraudnet.schemas.types import EntityKind, RiskScore, Severity, Subject
+from brain_content.ott_domain_analysis import OttDomainAnalyser
 from brain_content.url_reputation import ReputationLookup, domain_of
 
 MODEL_ID = "content-heuristic"
@@ -81,10 +82,16 @@ class HeuristicContentClassifier(ContentClassifier):
         url_reputation: ReputationLookup,
         bad_template_hashes: Iterable[str] = (),
         bad_body_hashes: Iterable[str] = (),
+        ott_analyser: OttDomainAnalyser | None = None,
     ) -> None:
         self._urls = url_reputation
         self._bad_templates = {t.lower() for t in bad_template_hashes}
         self._bad_bodies = {b.lower() for b in bad_body_hashes}
+        # OTT analyser: when set, the classifier checks every URL in the
+        # body for brand-lookalike / shortener / NRD before falling back
+        # to keyword heuristics. Lookalike + shortener is a HIGH signal
+        # even without a url-reputation hit.
+        self._ott = ott_analyser
 
     def classify(
         self,
@@ -140,6 +147,34 @@ class HeuristicContentClassifier(ContentClassifier):
                     evidence=evidence,
                     matched_urls=(url,),
                 )
+
+        # OTT heuristic over each URL's domain — catches lookalikes / shorteners
+        # that haven't yet propagated to url_reputation. Brand-lookalike +
+        # shortener is the highest-value novel-content signal.
+        if self._ott is not None:
+            for url in urls:
+                v = self._ott.analyse(domain_of(url))
+                if v.is_suspicious:
+                    evidence["url_match"] = url
+                    evidence.update(v.to_evidence())
+                    multi = v.is_brand_lookalike and v.is_url_shortener
+                    if multi or v.is_brand_lookalike:
+                        confidence = 0.85 if multi else 0.78
+                        return ClassificationResult(
+                            score=_score(confidence, evidence),
+                            signal_kind="sms.ott_lookalike",
+                            severity=Severity.HIGH,
+                            evidence=evidence,
+                            matched_urls=(url,),
+                        )
+                    if v.is_url_shortener:
+                        return ClassificationResult(
+                            score=_score(0.55, evidence),
+                            signal_kind="sms.url_shortener_abuse",
+                            severity=Severity.MEDIUM,
+                            evidence=evidence,
+                            matched_urls=(url,),
+                        )
 
         # Keyword heuristic
         body_l = body.lower()

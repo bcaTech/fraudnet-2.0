@@ -476,15 +476,25 @@ async def tenant_block_request(
 async def group_overview(
     repo: Annotated[GroupAnalyticsRepo, Depends(_group_repo)],
     principal: Annotated[Principal, Depends(_principal)],
+    include_by_opco: Annotated[bool, Query()] = True,
 ) -> dict[str, Any]:
+    """Group-wide fraud KPIs.
+
+    `include_by_opco` (default true) appends a per-tenant breakdown of the
+    same headline metrics. Useful for the group dashboard which needs
+    both the rolled-up and the per-opco view in one call.
+    """
     with with_purpose(Purpose.FRAUD_PREVENTION):
         out = await repo.overview()
+        if include_by_opco:
+            out["by_opco"] = await repo.overview_by_opco()
         await record(
             action="group.overview.read",
             resource_kind="group",
             resource_id="mtn-group",
             actor_id=principal.subject,
             tenant_id=principal.tenant_id,
+            metadata={"include_by_opco": str(include_by_opco).lower()},
         )
     return out
 
@@ -495,17 +505,27 @@ async def group_cross_opco_rings(
     repo: Annotated[GroupAnalyticsRepo, Depends(_group_repo)],
     principal: Annotated[Principal, Depends(_principal)],
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    peer: Annotated[str | None, Query()] = None,
+    status: Annotated[list[str] | None, Query()] = None,
 ) -> dict[str, Any]:
+    """Rings whose membership crosses opcos.
+
+    Filter by `peer` to scope to rings involving a specific peer opco; by
+    `status` to scope to monitoring/takedown/dismantled. Status defaults
+    to `monitoring` + `takedown` for the dashboard view; pass
+    `?status=dismantled` to inspect closed cases.
+    """
     with with_purpose(Purpose.FRAUD_PREVENTION):
-        rings = await repo.cross_opco_rings(limit=limit)
+        rings = await repo.cross_opco_rings(limit=limit, peer=peer, status=status)
         await record(
             action="group.cross_opco_rings.read",
             resource_kind="group",
             resource_id="mtn-group",
             actor_id=principal.subject,
             tenant_id=principal.tenant_id,
+            metadata={"peer": peer or "", "limit": str(limit)},
         )
-    return {"rings": rings, "count": len(rings)}
+    return {"rings": rings, "count": len(rings), "peer": peer}
 
 
 @router.get("/group/trending-motifs", dependencies=[Depends(_rate_limit)])
@@ -514,18 +534,57 @@ async def group_trending_motifs(
     repo: Annotated[GroupAnalyticsRepo, Depends(_group_repo)],
     principal: Annotated[Principal, Depends(_principal)],
     window_hours: Annotated[int, Query(ge=1, le=168)] = 24,
+    by_opco: Annotated[bool, Query()] = False,
 ) -> dict[str, Any]:
+    """Motif patterns trending across the group.
+
+    Default rolls up across opcos. `by_opco=true` appends a per-opco
+    breakdown so the dashboard can show heatmaps (motif × opco)."""
     with with_purpose(Purpose.FRAUD_PREVENTION):
         motifs = await repo.trending_motifs(window_hours=window_hours)
+        per_opco: list[dict[str, Any]] = []
+        if by_opco:
+            per_opco = await repo.trending_motifs_by_opco(window_hours=window_hours)
         await record(
             action="group.trending_motifs.read",
             resource_kind="group",
             resource_id="mtn-group",
             actor_id=principal.subject,
             tenant_id=principal.tenant_id,
+            metadata={
+                "window_hours": str(window_hours),
+                "by_opco": str(by_opco).lower(),
+            },
+        )
+    out: dict[str, Any] = {"window_hours": window_hours, "motifs": motifs}
+    if by_opco:
+        out["by_opco"] = per_opco
+    return out
+
+
+@router.get("/group/shared-flag-volume", dependencies=[Depends(_rate_limit)])
+@require_role(Role.GROUP_ADMIN)
+async def group_shared_flag_volume(
+    repo: Annotated[GroupAnalyticsRepo, Depends(_group_repo)],
+    principal: Annotated[Principal, Depends(_principal)],
+    window_hours: Annotated[int, Query(ge=1, le=720)] = 168,
+) -> dict[str, Any]:
+    """Volume of cross-opco intelligence flowing between tenants.
+
+    Used to monitor federation health — a tenant sharing zero outbound
+    flags over the last week is either inactive or has a bug.
+    """
+    with with_purpose(Purpose.FRAUD_PREVENTION):
+        rows = await repo.shared_flag_volume(window_hours=window_hours)
+        await record(
+            action="group.shared_flag_volume.read",
+            resource_kind="group",
+            resource_id="mtn-group",
+            actor_id=principal.subject,
+            tenant_id=principal.tenant_id,
             metadata={"window_hours": str(window_hours)},
         )
-    return {"window_hours": window_hours, "motifs": motifs}
+    return {"window_hours": window_hours, "edges": rows, "edge_count": len(rows)}
 
 
 # ---------------------------------------------------------------------------

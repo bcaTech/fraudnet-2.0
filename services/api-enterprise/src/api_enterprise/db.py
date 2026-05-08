@@ -395,7 +395,13 @@ class BlockRequestRepo:
 
 class GroupAnalyticsRepo:
     """Cross-tenant aggregates. Bypasses tenant filters by design — guarded
-    upstream by `@require_role(Role.GROUP_ADMIN)`."""
+    upstream by `@require_role(Role.GROUP_ADMIN)`.
+
+    These queries are read-only and never set the `fraudnet.tenant_id` GUC,
+    which is what RLS policies key on. RLS is therefore inert for the
+    GROUP_ADMIN session — that is the intent. The `@require_role` decorator
+    plus the audit-log emission on every call are the gates.
+    """
 
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -414,9 +420,15 @@ class GroupAnalyticsRepo:
                     count(*) FILTER (
                         WHERE created_at > now() - interval '24 hours'
                     )                                                  AS recent_24h,
+                    count(*) FILTER (
+                        WHERE created_at > now() - interval '7 days'
+                    )                                                  AS recent_7d,
                     count(*) FILTER (WHERE severity = 'critical')      AS critical,
                     count(*) FILTER (WHERE severity = 'high')          AS high,
-                    count(DISTINCT subject_id)                          AS distinct_subjects
+                    count(*) FILTER (WHERE severity = 'medium')       AS medium,
+                    count(*) FILTER (WHERE severity = 'low')           AS low,
+                    count(DISTINCT subject_id)                          AS distinct_subjects,
+                    count(DISTINCT tenant_id)                           AS distinct_tenants_with_alerts
                   FROM alerts
                 """
             )
@@ -428,31 +440,120 @@ class GroupAnalyticsRepo:
                    AND status IN ('monitoring', 'takedown')
                 """
             )
+            shared_24h = await conn.fetchval(
+                """
+                SELECT count(*)
+                  FROM shared_flags
+                 WHERE shared_at > now() - interval '24 hours'
+                """
+            )
+            block_pending = await conn.fetchval(
+                """
+                SELECT count(*) FROM enterprise_block_requests
+                 WHERE status = 'pending_review'
+                """
+            )
+            actions_24h = await conn.fetchval(
+                """
+                SELECT count(*)
+                  FROM actions_taken
+                 WHERE taken_at > now() - interval '24 hours'
+                   AND action_kind IN ('volte_tag', 'url_block', 'momo_friction')
+                """
+            )
         return {
             "active_tenants": int(tenants or 0),
             "open_alerts": int(row["open_alerts"]) if row else 0,
             "recent_24h": int(row["recent_24h"]) if row else 0,
+            "recent_7d": int(row["recent_7d"]) if row else 0,
             "by_severity": {
                 "critical": int(row["critical"]) if row else 0,
                 "high": int(row["high"]) if row else 0,
+                "medium": int(row["medium"]) if row else 0,
+                "low": int(row["low"]) if row else 0,
             },
             "distinct_subjects": int(row["distinct_subjects"]) if row else 0,
+            "distinct_tenants_with_alerts": (
+                int(row["distinct_tenants_with_alerts"]) if row else 0
+            ),
             "cross_opco_rings": int(cross_opco or 0),
+            "shared_flags_24h": int(shared_24h or 0),
+            "block_requests_pending": int(block_pending or 0),
+            "actions_taken_24h": int(actions_24h or 0),
         }
 
-    async def cross_opco_rings(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    async def overview_by_opco(self) -> list[dict[str, Any]]:
+        """Per-tenant (per-opco) breakdown of the headline KPIs.
+
+        For the federation context, each tenant in `enterprise_tenants` is
+        treated as one opco. The query left-joins so that opcos with no
+        alerts still appear in the result with zeros — useful for the
+        group dashboard's at-a-glance view.
+        """
         async with self._db.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, type, status, composite_score, active_since,
-                       last_activity, member_count, metadata
-                  FROM rings
-                 WHERE type = 'cross_opco'
-                 ORDER BY last_activity DESC
-                 LIMIT $1
-                """,
-                limit,
+                SELECT
+                    t.slug                                            AS tenant_slug,
+                    t.name                                            AS tenant_name,
+                    coalesce(stats.open_alerts, 0)                    AS open_alerts,
+                    coalesce(stats.recent_24h, 0)                     AS recent_24h,
+                    coalesce(stats.critical, 0)                       AS critical,
+                    coalesce(stats.high, 0)                           AS high
+                  FROM enterprise_tenants t
+                  LEFT JOIN (
+                    SELECT
+                        a.tenant_id,
+                        count(*) FILTER (
+                            WHERE a.status NOT IN ('closed', 'fp')
+                        )                                              AS open_alerts,
+                        count(*) FILTER (
+                            WHERE a.created_at > now() - interval '24 hours'
+                        )                                              AS recent_24h,
+                        count(*) FILTER (WHERE a.severity = 'critical') AS critical,
+                        count(*) FILTER (WHERE a.severity = 'high')     AS high
+                      FROM alerts a
+                      GROUP BY a.tenant_id
+                  ) stats ON stats.tenant_id = t.slug
+                 WHERE t.status = 'active'
+                 ORDER BY coalesce(stats.open_alerts, 0) DESC, t.slug
+                """
             )
+        return [dict(r) for r in rows]
+
+    async def cross_opco_rings(
+        self,
+        *,
+        limit: int = 50,
+        peer: str | None = None,
+        status: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Cross-opco rings with optional peer / status filters.
+
+        The peer filter looks at the ring's metadata.peers list (populated
+        by brain-graph when emitting cross_opco_ring motifs). Postgres'
+        JSONB @> containment operator makes this an indexed lookup once we
+        add a GIN index on rings.metadata, scheduled for the Phase 4 perf
+        sweep.
+        """
+        clauses: list[str] = ["type = 'cross_opco'"]
+        params: list[object] = []
+        if peer:
+            clauses.append(f"metadata @> ${len(params) + 1}::jsonb")
+            params.append({"peers": [peer]})
+        if status:
+            clauses.append(f"status = ANY(${len(params) + 1})")
+            params.append(status)
+        sql = (
+            "SELECT id, type, status, composite_score, active_since, "
+            "       last_activity, member_count, metadata "
+            "  FROM rings "
+            " WHERE " + " AND ".join(clauses)
+            + " ORDER BY last_activity DESC LIMIT $%d" % (len(params) + 1)
+        )
+        params.append(limit)
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
         return [dict(r) for r in rows]
 
     async def trending_motifs(self, *, window_hours: int = 24) -> list[dict[str, Any]]:
@@ -460,15 +561,61 @@ class GroupAnalyticsRepo:
             rows = await conn.fetch(
                 """
                 SELECT details ->> 'motif' AS motif,
-                       count(*)             AS hits,
+                       count(*)            AS hits,
                        count(DISTINCT tenant_id) AS distinct_tenants,
-                       max(created_at)      AS last_seen
+                       max(created_at)     AS last_seen,
+                       round(avg(score)::numeric, 3) AS avg_score
                   FROM alerts
                  WHERE details ? 'motif'
                    AND created_at > now() - ($1::int || ' hours')::interval
                  GROUP BY details ->> 'motif'
                  ORDER BY hits DESC
                  LIMIT 50
+                """,
+                window_hours,
+            )
+        return [dict(r) for r in rows]
+
+    async def trending_motifs_by_opco(
+        self, *, window_hours: int = 24
+    ) -> list[dict[str, Any]]:
+        """Per-opco motif breakdown — which opcos are seeing which motif
+        spike. Used by the group dashboard to show per-opco hot-spots."""
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT details ->> 'motif' AS motif,
+                       tenant_id          AS opco,
+                       count(*)            AS hits,
+                       max(created_at)     AS last_seen
+                  FROM alerts
+                 WHERE details ? 'motif'
+                   AND created_at > now() - ($1::int || ' hours')::interval
+                 GROUP BY details ->> 'motif', tenant_id
+                 ORDER BY hits DESC
+                 LIMIT 200
+                """,
+                window_hours,
+            )
+        return [dict(r) for r in rows]
+
+    async def shared_flag_volume(
+        self, *, window_hours: int = 168
+    ) -> list[dict[str, Any]]:
+        """Volume of cross-opco intelligence flowing in each direction over
+        the window. Useful to monitor federation health: a tenant sharing
+        zero outbound flags is either inactive or has a bug."""
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT sender_tenant     AS sender,
+                       recipient_tenant  AS recipient,
+                       count(*)          AS flags,
+                       max(shared_at)    AS last_shared
+                  FROM shared_flags
+                 WHERE shared_at > now() - ($1::int || ' hours')::interval
+                 GROUP BY sender_tenant, recipient_tenant
+                 ORDER BY flags DESC
                 """,
                 window_hours,
             )

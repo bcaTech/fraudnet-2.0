@@ -115,21 +115,86 @@ class _FakeTenantRepo:
 
 
 class _FakeGroupRepo:
+    def __init__(self) -> None:
+        self.cross_opco_calls: list[dict[str, Any]] = []
+        self.trending_calls: list[dict[str, Any]] = []
+
     async def overview(self) -> dict[str, Any]:
         return {
             "active_tenants": 3,
             "open_alerts": 12,
             "recent_24h": 4,
-            "by_severity": {"critical": 1, "high": 2},
+            "recent_7d": 30,
+            "by_severity": {"critical": 1, "high": 2, "medium": 5, "low": 4},
             "distinct_subjects": 9,
+            "distinct_tenants_with_alerts": 3,
             "cross_opco_rings": 0,
+            "shared_flags_24h": 5,
+            "block_requests_pending": 1,
+            "actions_taken_24h": 7,
         }
 
-    async def cross_opco_rings(self, **_: Any) -> list[dict[str, Any]]:
+    async def overview_by_opco(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "tenant_slug": "mtn-ghana",
+                "tenant_name": "MTN Ghana",
+                "open_alerts": 8,
+                "recent_24h": 3,
+                "critical": 1,
+                "high": 1,
+            },
+            {
+                "tenant_slug": "mtn-uganda",
+                "tenant_name": "MTN Uganda",
+                "open_alerts": 4,
+                "recent_24h": 1,
+                "critical": 0,
+                "high": 1,
+            },
+        ]
+
+    async def cross_opco_rings(self, **kw: Any) -> list[dict[str, Any]]:
+        self.cross_opco_calls.append(kw)
         return []
 
-    async def trending_motifs(self, **_: Any) -> list[dict[str, Any]]:
-        return []
+    async def trending_motifs(self, **kw: Any) -> list[dict[str, Any]]:
+        self.trending_calls.append(kw)
+        return [
+            {
+                "motif": "voice_sms_momo_24h",
+                "hits": 12,
+                "distinct_tenants": 2,
+                "last_seen": "2026-05-08T00:00:00+00:00",
+                "avg_score": 0.81,
+            }
+        ]
+
+    async def trending_motifs_by_opco(self, **_: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "motif": "voice_sms_momo_24h",
+                "opco": "mtn-ghana",
+                "hits": 7,
+                "last_seen": "2026-05-08T00:00:00+00:00",
+            },
+            {
+                "motif": "voice_sms_momo_24h",
+                "opco": "mtn-uganda",
+                "hits": 5,
+                "last_seen": "2026-05-08T00:00:00+00:00",
+            },
+        ]
+
+    async def shared_flag_volume(self, **_: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "sender": "mtn-ghana",
+                "recipient": "mtn-uganda",
+                "flags": 18,
+                "last_shared": "2026-05-08T00:00:00+00:00",
+            }
+        ]
 
 
 class _FakeGraph:
@@ -230,7 +295,62 @@ def test_group_overview_allowed_for_group_admin() -> None:
     client = _build_test_app(_principal(Role.GROUP_ADMIN))
     r = client.get("/group/overview")
     assert r.status_code == 200
-    assert r.json()["active_tenants"] == 3
+    body = r.json()
+    assert body["active_tenants"] == 3
+    # by_opco appended by default
+    assert "by_opco" in body
+    assert len(body["by_opco"]) == 2
+
+
+def test_group_overview_without_by_opco() -> None:
+    client = _build_test_app(_principal(Role.GROUP_ADMIN))
+    r = client.get("/group/overview?include_by_opco=false")
+    assert r.status_code == 200
+    assert "by_opco" not in r.json()
+
+
+def test_group_cross_opco_rings_filters_propagate() -> None:
+    """The peer + status query params must reach the repo unchanged."""
+    client = _build_test_app(_principal(Role.GROUP_ADMIN))
+    r = client.get("/group/cross-opco-rings?peer=mtn-uganda&status=monitoring&limit=5")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["peer"] == "mtn-uganda"
+
+
+def test_group_trending_motifs_default() -> None:
+    client = _build_test_app(_principal(Role.GROUP_ADMIN))
+    r = client.get("/group/trending-motifs?window_hours=12")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["window_hours"] == 12
+    assert len(body["motifs"]) == 1
+    # by_opco not included unless requested
+    assert "by_opco" not in body
+
+
+def test_group_trending_motifs_by_opco() -> None:
+    client = _build_test_app(_principal(Role.GROUP_ADMIN))
+    r = client.get("/group/trending-motifs?by_opco=true")
+    assert r.status_code == 200
+    body = r.json()
+    assert "by_opco" in body
+    assert len(body["by_opco"]) == 2
+
+
+def test_group_shared_flag_volume() -> None:
+    client = _build_test_app(_principal(Role.GROUP_ADMIN))
+    r = client.get("/group/shared-flag-volume?window_hours=168")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["window_hours"] == 168
+    assert body["edge_count"] == 1
+
+
+def test_group_shared_flag_volume_refuses_non_group_admin() -> None:
+    client = _build_test_app(_principal(Role.ENTERPRISE_ADMIN))
+    r = client.get("/group/shared-flag-volume")
+    assert r.status_code == 403
 
 
 def test_create_tenant_requires_step_up() -> None:

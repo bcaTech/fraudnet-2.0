@@ -7,11 +7,17 @@ SignalEventV1 to fraud.signals.v1 when a signal_kind triggers.
 Why graph.mutations.v1 and not the source topics: stream-graph has already
 done the per-event work to identify the affected subjects. Subscribing here
 means we score on the fan-out the graph has computed, not on raw events.
+
+Best-of-breed sprint: every scored MSISDN is also checked against the AML
+watchlist service. A hit emits a separate `aml.watchlist_match` signal
+on the same topic so decisions can apply Tier-1 freeze policy.
 """
 
 from __future__ import annotations
 
 import asyncio
+from time import time
+from uuid import uuid4
 
 from business_registry.client import BusinessRegistryClient, NoopBusinessRegistryClient
 from fraudnet.features import FeatureStore
@@ -20,8 +26,17 @@ from fraudnet.kafka.consumer import ConsumedMessage
 from fraudnet.obs import counter, get_logger
 from fraudnet.schemas.events import GraphMutationV1
 from fraudnet.schemas.signals import SignalEventV1
-from fraudnet.schemas.types import EntityKind, RiskScore, Severity
+from fraudnet.schemas.types import EntityKind, RiskScore, Severity, Subject
 from brain_behavioural.scorer import Scorer, ScoringResult, to_signal
+
+try:
+    from aml_watchlist.client import (  # type: ignore[import-not-found]
+        NoopWatchlistClient,
+        WatchlistClient,
+    )
+except ImportError:  # pragma: no cover — production installs the client
+    WatchlistClient = None  # type: ignore[assignment,misc]
+    NoopWatchlistClient = None  # type: ignore[assignment,misc]
 
 _log = get_logger("brain_behavioural.runner")
 
@@ -40,6 +55,14 @@ _VERIFIED_DISCOUNT = counter(
     "Score discounts applied for verified businesses.",
     labelnames=("entity_kind",),
 )
+_WATCHLIST_HITS = counter(
+    "brain_behavioural_watchlist_hits_total",
+    "AML watchlist hits during scoring.",
+    labelnames=("source", "category"),
+)
+
+
+_WATCHLIST_SIGNAL_KIND = "aml.watchlist_match"
 
 
 VERIFIED_BUSINESS_DISCOUNT = 0.1  # multiply score by this when verified
@@ -63,12 +86,16 @@ class BehaviouralRunner:
         signal_producer: AvroProducer[SignalEventV1],
         kafka_settings_factory,
         business_registry: BusinessRegistryClient | None = None,
+        watchlist: object | None = None,
     ) -> None:
         self._scorer = scorer
         self._store = feature_store
         self._producer = signal_producer
         self._make_settings = kafka_settings_factory
         self._registry = business_registry or NoopBusinessRegistryClient()
+        # Watchlist client is optional. None or NoopWatchlistClient
+        # → no AML signals are emitted.
+        self._watchlist = watchlist
         self._stop = asyncio.Event()
         self._consumer: object | None = None
 
@@ -118,6 +145,9 @@ class BehaviouralRunner:
         _SCORED.labels(entity_kind="number", fired=str(fired).lower()).inc()
         if signal is not None:
             await self._producer.send(signal, key=msisdn)
+        # AML watchlist enrichment — separate signal, fires regardless of
+        # whether the behavioural rule fired.
+        await self._emit_watchlist_hit(msisdn, source=source)
 
     async def _apply_verified_discount(
         self, result: ScoringResult, msisdn: str, entity_kind: str
@@ -175,6 +205,64 @@ class BehaviouralRunner:
         _SCORED.labels(entity_kind="wallet", fired=str(fired).lower()).inc()
         if signal is not None:
             await self._producer.send(signal, key=wallet_id)
+
+    async def _emit_watchlist_hit(self, msisdn: str, *, source: str) -> None:
+        """Check the AML watchlist for the MSISDN; if it hits, emit a
+        dedicated `aml.watchlist_match` signal alongside the behavioural
+        signal. Fail-soft: a watchlist outage must not stop scoring.
+        """
+        if self._watchlist is None:
+            return
+        try:
+            hit = await self._watchlist.check_msisdn(msisdn)  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            return
+        if not hit.hit:
+            return
+        _WATCHLIST_HITS.labels(
+            source=hit.source or "unknown", category=hit.category or "unknown"
+        ).inc()
+        now_ms = int(time() * 1000)
+        # Severity scales with the match score: ≥0.95 → CRITICAL (Tier 1),
+        # ≥0.90 → HIGH, otherwise MEDIUM. The decisions policy YAML reads
+        # these to route the action.
+        severity = (
+            Severity.CRITICAL
+            if hit.score >= 0.95
+            else Severity.HIGH
+            if hit.score >= 0.90
+            else Severity.MEDIUM
+        )
+        signal = SignalEventV1(
+            event_id=f"sig_{uuid4().hex[:24]}",
+            event_ts_ms=now_ms,
+            ingest_ts_ms=now_ms,
+            source=f"brain-behavioural:aml:{source}",
+            signal_kind=_WATCHLIST_SIGNAL_KIND,
+            subject=Subject(kind=EntityKind.NUMBER, id=msisdn),
+            score=RiskScore(
+                value=hit.score,
+                model_id="aml-watchlist",
+                model_version="0.1.0",
+                computed_at_ms=now_ms,
+            ),
+            severity=severity,
+            evidence={
+                "watchlist_source": hit.source or "",
+                "watchlist_category": hit.category or "",
+                "matched_entry_id": hit.matched_entry_id or "",
+                "matched_name": hit.matched_name or "",
+            },
+            suppression_key=(
+                f"mtn-ghana:number:{msisdn}:{_WATCHLIST_SIGNAL_KIND}:"
+                f"{hit.matched_entry_id or ''}"
+            ),
+            explanation_text=(
+                f"AML watchlist match: {hit.matched_name} "
+                f"({hit.source}/{hit.category}); score {hit.score:.2f}."
+            ),
+        )
+        await self._producer.send(signal, key=msisdn)
 
 
 def make_settings_factory(

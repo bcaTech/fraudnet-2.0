@@ -13,6 +13,7 @@ dependencies = [
   "fraudnet-features",
   "fraudnet-model-registry",
   "fraudnet-xai",
+  "aml-watchlist",
   "business-registry",
   "httpx>=0.28",
 ]
@@ -24,6 +25,7 @@ fraudnet-kafka = { workspace = true }
 fraudnet-features = { workspace = true }
 fraudnet-model-registry = { workspace = true }
 fraudnet-xai = { workspace = true }
+aml-watchlist = { workspace = true }
 business-registry = { workspace = true }
 
 [dependency-groups]

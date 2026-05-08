@@ -19,6 +19,33 @@ rules:
     suppression_window_s: 86400
 
   # ---- Tier 1: inline ----
+  # AML watchlist match — strictest action. CRITICAL (score >= 0.95) →
+  # immediate MoMo freeze + compliance notification; HIGH (>= 0.90) →
+  # SwC friction + analyst alert; below threshold → investigation queue.
+  - id: aml-watchlist-tier1-critical
+    match:
+      signal_kind: aml.watchlist_match
+      severity_in: [critical]
+    action: momo.freeze_account
+    tier: tier1
+    suppression_window_s: 86400
+
+  - id: aml-watchlist-tier1-high
+    match:
+      signal_kind: aml.watchlist_match
+      severity_in: [high]
+    action: momo.send_with_care
+    tier: tier1
+    suppression_window_s: 86400
+
+  - id: aml-watchlist-tier3
+    match:
+      signal_kind: aml.watchlist_match
+      severity_in: [medium, low]
+    action: investigation.queue
+    tier: tier3
+    suppression_window_s: 86400
+
   - id: voice-velocity-burst-tier1
     match:
       signal_kind: voice.velocity_burst

@@ -109,3 +109,33 @@ The cost is one extra refactor per stream service. The benefit is shipping Phase
 **Channel implication:** Passive mode delivers via SMS only — every MTN handset can receive an SMS, no app/USSD enrolment required. Active mode (registered on api-customer) adds USSD and in-app push.
 
 **Revisit:** If subscriber complaints about unwanted notifications cross a defined threshold (>1 per 1000 alerts/month), introduce a one-tap opt-out via `STOP` reply to a recent fraud-alert SMS.
+
+---
+
+## D-009 — brain-agent calls the LLM synchronously, not via a queue
+
+**Decision:** The investigation agent's `submit()` runs evidence collection + LLM call inline; the analyst's HTTP request blocks until the report is ready. The job_id + GET endpoint exist for later poll-and-resume but are not on the latency-critical path.
+
+**Why:** The Anthropic API call is the dominant latency (5–30s for Opus), and the analyst is already waiting on it. Adding a queue + worker would (a) increase tail latency by the queue-poll interval and (b) require an extra hop's worth of operational machinery for a workload measured in hundreds-of-requests-per-day, not thousands-per-second. The semaphore on the agent (default 4 concurrent) caps the LLM concurrency without a queue.
+
+**Revisit:** If investigation volume crosses ~1k/day per opco, introduce a Celery queue and switch the API to async response (202 + GET poll). The interface already supports this pattern.
+
+---
+
+## D-010 — brain-agent redacts at prompt boundary, not at evidence-collection boundary
+
+**Decision:** Evidence collectors return plaintext identifiers (because they need them to query Memgraph and Aerospike); the prompt builder is the single redaction seam. Anything the LLM sees has been through `_redact()` or `redact_for_prompt()`.
+
+**Why:** Putting redaction inside collectors duplicates the logic across N callers and fragments the audit story. Centralising it in `prompt.py` makes the wire-format contract auditable: one file, one set of tests, one place to change the salt or kind handling.
+
+**Revisit:** If a collector ever needs to return data that the LLM is trusted to see un-redacted (e.g. timestamps, severity strings already are), the seam stays the right place — the redactor leaves non-PII fields untouched.
+
+---
+
+## D-011 — brain-agent recommended_actions is restricted to Tier 2 / Tier 3
+
+**Decision:** The Pydantic schema for `RecommendedAction.tier` is `Literal["tier2", "tier3"]`. Tier 1 (inline) is rejected at parse time.
+
+**Why CLAUDE.md is silent:** The spec defines three tiers but does not say which tier an LLM-generated recommendation is allowed to suggest. We're choosing to forbid Tier 1: inline actions execute synchronously on the network path with sub-200ms budgets, and routing those through analyst review (the human-in-the-loop step the agent feeds) defeats the purpose. The decisions service already owns Tier 1 via codified YAML policy; the agent's role is to inform the analyst's *manual* approval of Tier 2/3 actions.
+
+**Revisit:** If the platform team ever wants a "draft Tier 1 policy change" workflow, that would be a different interface (it produces a YAML diff, not an action) and should not reuse this schema.

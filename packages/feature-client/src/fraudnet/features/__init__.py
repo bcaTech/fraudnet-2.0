@@ -16,7 +16,11 @@ Bins are typed strings; producers and consumers use the FeatureSnapshot
 dataclass to keep the field set in lockstep.
 """
 
-from fraudnet.features.client import AerospikeFeatureStore, FeatureStore
+from fraudnet.features.client import (
+    AerospikeFeatureStore,
+    FeatureStore,
+    InMemoryFeatureStore,
+)
 from fraudnet.features.snapshot import (
     FeatureSnapshot,
     NumberFeatures,
@@ -27,6 +31,7 @@ __all__ = [
     "AerospikeFeatureStore",
     "FeatureSnapshot",
     "FeatureStore",
+    "InMemoryFeatureStore",
     "NumberFeatures",
     "WalletFeatures",
 ]

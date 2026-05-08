@@ -26,6 +26,9 @@ class Settings:
     flush_every_events: int = 100
     flush_every_seconds: float = 5.0
 
+    # 'standalone' (Phase-1 in-process runner) | 'cluster' (PyFlink job).
+    flink_mode: str = "standalone"
+
     # Healthcheck server
     health_host: str = "0.0.0.0"  # noqa: S104
     health_port: int = 8110
@@ -42,6 +45,7 @@ class Settings:
             feature_ttl_s=int(os.environ.get("FEATURE_TTL_S", "86400")),
             flush_every_events=int(os.environ.get("FLUSH_EVERY_EVENTS", "100")),
             flush_every_seconds=float(os.environ.get("FLUSH_EVERY_SECONDS", "5.0")),
+            flink_mode=os.environ.get("FLINK_MODE", "standalone"),
             health_host=os.environ.get("STREAM_FEATURES_HEALTH_HOST", "0.0.0.0"),  # noqa: S104
             health_port=int(os.environ.get("STREAM_FEATURES_HEALTH_PORT", "8110")),
         )

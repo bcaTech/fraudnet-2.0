@@ -49,6 +49,11 @@ topics:
     config:
       retention.ms: 7776000000         # 90d
 
+  - name: features.v1                  # PyFlink stream-features sink (cluster mode)
+    partitions: 50
+    config:
+      retention.ms: 86400000           # 24h — drained into Aerospike by sidecar
+
   # ---- Brain → Decisions ----
   - name: fraud.signals.v1
     partitions: 50

@@ -44,6 +44,19 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
+        app.state.flink_mode = settings.flink_mode
+
+        if settings.flink_mode == "cluster":
+            # Cluster mode: this sidecar exposes only /health and /metrics.
+            # The actual stream processing runs as a PyFlink job submitted
+            # by `scripts/submit_pyflink_jobs.sh` (or the Flink K8s Operator).
+            _log.info("stream_features.started", env=settings.env, mode="cluster")
+            try:
+                yield
+            finally:
+                _log.info("stream_features.stopping")
+            return
+
         pipeline = FeaturePipeline()
         store = AerospikeFeatureStore(hosts=_aerospike_hosts(settings.aerospike_hosts))
         runner = FeatureRunner(
@@ -59,7 +72,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         app.state.pipeline = pipeline
         app.state.runner = runner
         runner_task = asyncio.create_task(runner.start(), name="feature-runner")
-        _log.info("stream_features.started", env=settings.env)
+        _log.info("stream_features.started", env=settings.env, mode="standalone")
         try:
             yield
         finally:
@@ -81,10 +94,12 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health/ready", include_in_schema=False)
     async def readiness() -> dict[str, object]:
+        if settings.flink_mode == "cluster":
+            return {"status": "ready", "service": settings.service_name, "mode": "cluster"}
         runner = getattr(app.state, "runner", None)
         if runner is None:
             return {"status": "starting"}
-        return {"status": "ready", "service": settings.service_name}
+        return {"status": "ready", "service": settings.service_name, "mode": "standalone"}
 
     @app.get("/metrics", include_in_schema=False)
     async def metrics() -> Response:

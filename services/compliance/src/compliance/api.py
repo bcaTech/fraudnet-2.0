@@ -1,20 +1,28 @@
 """Read-only API surface for compliance.
 
-Audit lookups by request_id / time range. The export endpoint streams a
-date-range slice as NDJSON; Phase 2 swaps to per-regulator templated packs.
+Audit lookups by request_id / time range, NDJSON range export, plus
+per-regulator templated packs (NCA / DPC / BoG / CSA / GFIC). The
+templated exports are async-job-shaped because building a busy month's
+pack involves several seconds of database work; the analyst polls
+`GET /compliance/export/{job_id}` for the result.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
-from fraudnet.obs import get_logger, metrics_endpoint
+from fraudnet.obs import counter, get_logger, metrics_endpoint
 from compliance.archive import ArchiveScheduler, IcebergArchiver
+from compliance.regulators import REGULATOR_TEMPLATES, REPORT_BUILDERS, render_report_pdf
+from compliance.regulators.jobs import ExportJob, JobStore
+from compliance.regulators.loader import load_corpus
 from compliance.store import AuditStore
 
 _log = get_logger("compliance.api")
@@ -160,3 +168,192 @@ def _to_jsonable(row: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+# ---------------------------------------------------------------------------
+# Regulator export endpoints
+# ---------------------------------------------------------------------------
+
+
+_EXPORT_JOBS = counter(
+    "compliance_export_jobs_total",
+    "Regulator export jobs by outcome.",
+    labelnames=("regulator", "outcome"),
+)
+
+
+def _job_store(request: Request) -> JobStore:
+    return request.app.state.job_store  # type: ignore[no-any-return]
+
+
+class ExportRequest(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    tenant_id: str = "mtn-ghana"
+
+
+class ExportJobResponse(BaseModel):
+    job_id: str
+    regulator: str
+    status: str
+    period_start: str
+    period_end: str
+    review_field_count: int = 0
+    created_at_ms: int
+    updated_at_ms: int
+    error: str | None = None
+
+
+@router.get("/compliance/templates")
+async def list_templates() -> dict[str, Any]:
+    """Available regulator templates with their submission targets."""
+    return {"templates": REGULATOR_TEMPLATES}
+
+
+@router.post("/compliance/export/{regulator}", response_model=ExportJobResponse)
+async def trigger_export(
+    regulator: str,
+    body: ExportRequest,
+    request: Request,
+    store: Annotated[AuditStore, Depends(_store)],
+    jobs: Annotated[JobStore, Depends(_job_store)],
+) -> ExportJobResponse:
+    if regulator not in REPORT_BUILDERS:
+        raise HTTPException(status_code=400, detail=f"unknown regulator: {regulator}")
+    if body.period_start >= body.period_end:
+        raise HTTPException(status_code=400, detail="period_start must be before period_end")
+
+    actor_id = request.headers.get("X-Actor-Id")
+    job = await jobs.create(
+        regulator=regulator,
+        period_start=body.period_start.isoformat(),
+        period_end=body.period_end.isoformat(),
+        tenant_id=body.tenant_id,
+        actor_id=actor_id,
+    )
+
+    async def _run() -> None:
+        try:
+            job.status = "running"
+            await jobs.update(job)
+            corpus = await load_corpus(
+                store.pool,
+                tenant_id=body.tenant_id,
+                period_start=body.period_start.replace(
+                    tzinfo=body.period_start.tzinfo or timezone.utc
+                ),
+                period_end=body.period_end.replace(
+                    tzinfo=body.period_end.tzinfo or timezone.utc
+                ),
+            )
+            report = REPORT_BUILDERS[regulator](corpus)
+            job.json_payload = _report_to_json(report)
+            job.pdf_bytes = render_report_pdf(report)
+            job.review_field_count = report.review_field_count
+            job.status = "completed"
+            _EXPORT_JOBS.labels(regulator=regulator, outcome="ok").inc()
+        except Exception as exc:  # noqa: BLE001
+            job.status = "failed"
+            job.error = str(exc)
+            _EXPORT_JOBS.labels(regulator=regulator, outcome="error").inc()
+            _log.exception("compliance.export.failed", regulator=regulator)
+        await jobs.update(job)
+
+    asyncio.create_task(_run(), name=f"compliance-export-{job.job_id}")
+
+    return ExportJobResponse(
+        job_id=job.job_id,
+        regulator=job.regulator,
+        status=job.status,
+        period_start=job.period_start,
+        period_end=job.period_end,
+        review_field_count=0,
+        created_at_ms=job.created_at_ms,
+        updated_at_ms=job.updated_at_ms,
+    )
+
+
+@router.get("/compliance/export/{job_id}")
+async def export_job_status(
+    job_id: str,
+    jobs: Annotated[JobStore, Depends(_job_store)],
+    format: Annotated[str, Query(pattern="^(status|json|pdf)$")] = "status",
+) -> Response:
+    """`status` returns the job state; `json` returns the structured payload;
+    `pdf` returns the rendered submission packet."""
+    job = await jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if format == "status":
+        return Response(
+            content=ExportJobResponse(
+                job_id=job.job_id,
+                regulator=job.regulator,
+                status=job.status,
+                period_start=job.period_start,
+                period_end=job.period_end,
+                review_field_count=job.review_field_count,
+                created_at_ms=job.created_at_ms,
+                updated_at_ms=job.updated_at_ms,
+                error=job.error,
+            ).model_dump_json(),
+            media_type="application/json",
+        )
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail=f"job status is {job.status}")
+    if format == "json":
+        if job.json_payload is None:
+            raise HTTPException(status_code=410, detail="payload no longer available")
+        return Response(
+            content=json.dumps(job.json_payload, default=str),
+            media_type="application/json",
+        )
+    # format == "pdf"
+    if job.pdf_bytes is None:
+        raise HTTPException(status_code=410, detail="pdf no longer available")
+    return Response(
+        content=job.pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{job.regulator}-{job.period_start[:10]}_'
+                f'{job.period_end[:10]}.pdf"'
+            ),
+        },
+    )
+
+
+def _report_to_json(report: Any) -> dict[str, Any]:
+    """Convert a RegulatorReport dataclass tree to a JSON-safe dict.
+
+    Inlines `needs_review` so the API response makes the mandatory-fill
+    set obvious to the consumer (the reviewer UI / submission portal).
+    """
+    return {
+        "regulator": report.regulator,
+        "template_id": report.template_id,
+        "period_start": report.period_start,
+        "period_end": report.period_end,
+        "review_field_count": report.review_field_count,
+        "metadata": report.metadata,
+        "sections": [
+            {
+                "title": s.title,
+                "fields": [
+                    {
+                        "name": f.name,
+                        "label": f.label,
+                        "value": f.value,
+                        "needs_review": f.needs_review,
+                        "note": f.note,
+                    }
+                    for f in s.fields
+                ],
+            }
+            for s in report.sections
+        ],
+    }
+
+
+# Suppress unused — ExportJob is exported for tests.
+_ = ExportJob

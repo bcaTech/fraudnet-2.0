@@ -42,6 +42,10 @@ def create_app(
         )
         app.state.store = store
         app.state.runner = runner
+        # JobStore for regulator-export endpoints.
+        from compliance.regulators.jobs import JobStore as _JobStore
+
+        app.state.job_store = _JobStore()
 
         archive_cfg = settings_from_env()
         archive_scheduler: ArchiveScheduler | None = None

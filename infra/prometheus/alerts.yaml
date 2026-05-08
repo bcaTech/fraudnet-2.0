@@ -1,0 +1,186 @@
+# FraudNet Prometheus alert rules.
+#
+# Loaded by Prometheus via rule_files in prometheus.yml. Severity convention:
+#   critical → page on-call immediately
+#   warning  → ticket / Slack only
+#
+# Reasoning is included in `description` so the alert is actionable from the
+# notification alone. Per-service runbooks (docs/runbooks/) own the response
+# steps; this file owns the *trigger*.
+
+groups:
+  # --------------------------------------------------------------------------
+  - name: fraudnet.platform
+    interval: 30s
+    rules:
+      - alert: FraudNetServiceDown
+        expr: up{job="services"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "Service {{ $labels.instance }} is DOWN"
+          description: |
+            Prometheus has been unable to scrape /metrics on {{ $labels.instance }}
+            for 2m. Check container health:  `docker compose ps`  and the
+            service logs:  `docker compose logs --tail=200 {{ $labels.instance }}`.
+
+      - alert: FraudNetHighErrorRate
+        expr: |
+          100 * sum by (service) (rate(fraudnet_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum by (service) (rate(fraudnet_requests_total[5m])), 1e-9)
+            > 1
+        for: 5m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "{{ $labels.service }} 5xx rate > 1% for 5m"
+          description: |
+            5xx error rate has exceeded 1% on {{ $labels.service }} for 5
+            minutes. Open the per-service dashboard for the route + status
+            breakdown, then check upstream (Postgres, Memgraph, Aerospike,
+            Kafka) before code-level investigation.
+
+      - alert: FraudNetWarningErrorRate
+        expr: |
+          100 * sum by (service) (rate(fraudnet_requests_total{status=~"5.."}[10m]))
+            / clamp_min(sum by (service) (rate(fraudnet_requests_total[10m])), 1e-9)
+            > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: fraudnet-oncall
+        annotations:
+          summary: "{{ $labels.service }} 5xx rate > 0.5% for 10m"
+          description: |
+            Sustained warning-level error rate. Not yet pageable — open a
+            ticket and watch the trend.
+
+  # --------------------------------------------------------------------------
+  - name: fraudnet.kafka
+    interval: 30s
+    rules:
+      - alert: KafkaConsumerLagCritical
+        expr: max by (consumergroup) (kafka_consumergroup_lag) > 10000
+        for: 5m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "{{ $labels.consumergroup }} lag > 10k for 5m"
+          description: |
+            Sustained consumer lag indicates the consumer cannot keep up with
+            its source topic. For ingest-* this typically means the probe
+            vendor or SMSC is sending faster than the service can handle —
+            scale the consumer (`kubectl scale deploy {{ $labels.consumergroup }} --replicas=N`)
+            and check broker partition skew. Runbook: §11.1.
+
+      - alert: KafkaConsumerLagWarning
+        expr: max by (consumergroup) (kafka_consumergroup_lag) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: fraudnet-oncall
+        annotations:
+          summary: "{{ $labels.consumergroup }} lag > 1k for 10m"
+          description: |
+            Early-warning lag. Usually self-corrects under normal traffic
+            variance; watch the trend before paging.
+
+      - alert: KafkaDLQActivity
+        expr: sum(rate(fraudnet_kafka_messages_dlq_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "Messages flowing to DLQ topics ({{ $value | humanize }}/s)"
+          description: |
+            DLQ activity indicates either a schema-incompatibility incident
+            or upstream sending malformed events. Inspect the relevant DLQ
+            (`*.dlq.v1`) — `kafka-console-consumer --topic <name>.dlq.v1
+            --from-beginning --max-messages 5`.
+
+      - alert: KafkaProducerFailures
+        expr: sum by (topic) (rate(fraudnet_kafka_messages_failed_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: fraudnet-oncall
+        annotations:
+          summary: "Producer failures on {{ $labels.topic }}"
+          description: |
+            > 5 producer failures/s for 5 minutes. Check broker availability
+            and the producer's local retries.
+
+  # --------------------------------------------------------------------------
+  - name: fraudnet.inline-tier
+    interval: 30s
+    rules:
+      - alert: Tier1ActuatorLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, route) (rate(fraudnet_request_duration_seconds_bucket{service="action-tier1"}[5m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "Tier-1 actuator p99 > 200 ms (route {{ $labels.route }})"
+          description: |
+            CLAUDE.md §1 sets a sub-200 ms inline budget. p99 above this on
+            the inline path means VoLTE in-call tagging is at risk of being
+            late-arrived (and therefore ignored) by the IMS core. Roll back
+            the most recent action-tier1 deploy if the regression is recent.
+
+      - alert: BrainGraphP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(fraudnet_graph_query_seconds_bucket{service=~"brain-graph|api-noc"}[5m]))
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: fraudnet-oncall
+        annotations:
+          summary: "Graph query p99 > 100 ms"
+          description: |
+            CLAUDE.md §11.2 — investigate Memgraph cluster health first,
+            then feature-store availability, then roll back the model.
+
+  # --------------------------------------------------------------------------
+  - name: fraudnet.business
+    interval: 60s
+    rules:
+      - alert: NoSignalsBeingProduced
+        expr: |
+          sum(rate(fraudnet_kafka_messages_sent_total{topic="fraud.signals.v1"}[10m])) == 0
+        for: 15m
+        labels:
+          severity: warning
+          team: fraudnet-oncall
+        annotations:
+          summary: "No fraud signals produced for 15m"
+          description: |
+            Brain services (or upstream ingest) are not producing signals.
+            Either the platform is silent (suspicious — fraud rarely sleeps)
+            or a brain service is stuck. Check brain-* health.
+
+      - alert: NoDecisionsDispatched
+        expr: |
+          sum(rate(fraudnet_kafka_messages_sent_total{topic="decisions.dispatched.v1"}[10m])) == 0
+            and
+          sum(rate(fraudnet_kafka_messages_sent_total{topic="fraud.signals.v1"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: critical
+          team: fraudnet-oncall
+        annotations:
+          summary: "Signals are flowing but no decisions are being dispatched"
+          description: |
+            decisions service is consuming signals but not emitting dispatches.
+            Likely a policy misconfiguration (DECISIONS_POLICY_DIR) or a
+            crash loop. Check `docker compose logs decisions`.

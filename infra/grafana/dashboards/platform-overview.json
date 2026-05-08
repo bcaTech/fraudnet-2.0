@@ -1,0 +1,224 @@
+{
+  "title": "FraudNet — Platform Overview",
+  "uid": "fraudnet-platform-overview",
+  "description": "Cross-service health: events/sec per Kafka topic, consumer lag, error rates. The first dashboard on-call opens during an incident.",
+  "tags": ["fraudnet", "platform", "overview"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(fraudnet_requests_total, service)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Services up",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "count(up{job=\"services\"} == 1)",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 8 },
+              { "color": "green", "value": 13 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total events/sec (Kafka in)",
+      "gridPos": { "x": 4, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(fraudnet_kafka_messages_received_total[1m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total errors/sec (Kafka)",
+      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(fraudnet_kafka_messages_failed_total[5m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "DLQ messages/sec",
+      "gridPos": { "x": 14, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(fraudnet_kafka_messages_dlq_total[5m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Events produced per topic",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic) (rate(fraudnet_kafka_messages_sent_total[1m]))",
+          "legendFormat": "{{topic}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Events consumed per topic",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic) (rate(fraudnet_kafka_messages_received_total[1m]))",
+          "legendFormat": "{{topic}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Consumer lag (per group, sum across partitions)",
+      "description": "kafka_consumergroup_lag is exported by the JMX exporter on the broker. Critical >10k.",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Failed messages by topic / reason",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic, reason) (rate(fraudnet_kafka_messages_failed_total[5m]))",
+          "legendFormat": "{{topic}} / {{reason}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "HTTP request rate per service",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(fraudnet_requests_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "HTTP error rate per service (5xx + 4xx>=400)",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(fraudnet_requests_total{service=~\"$service\",status=~\"4..|5..\"}[5m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "p99 request latency per service",
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (service, le) (rate(fraudnet_request_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

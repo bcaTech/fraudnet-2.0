@@ -1,0 +1,215 @@
+{
+  "title": "FraudNet — Per-Service",
+  "uid": "fraudnet-per-service",
+  "description": "Drill-down for one service: RED metrics (Rate, Errors, Duration) plus its Kafka consumer lag. Pick the service via the $service variable.",
+  "tags": ["fraudnet", "service"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-3h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(fraudnet_requests_total, service)",
+        "current": { "text": "api-noc", "value": "api-noc" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Up?",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "max(up{job=\"services\"} * on(instance) group_left(service) label_replace(fraudnet_requests_total{service=\"$service\"}, \"\", \"\", \"\", \"\")) or vector(0)",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Requests/sec",
+      "gridPos": { "x": 4, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(fraudnet_requests_total{service=\"$service\"}[1m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Error %  (5m)",
+      "gridPos": { "x": 9, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(fraudnet_requests_total{service=\"$service\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(fraudnet_requests_total{service=\"$service\"}[5m])), 1e-9)",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p99 latency (5m)",
+      "gridPos": { "x": 14, "y": 0, "w": 5, "h": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fraudnet_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Request rate by route + status",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (route, status) (rate(fraudnet_requests_total{service=\"$service\"}[1m]))",
+          "legendFormat": "{{route}} {{status}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Latency quantiles (p50/p95/p99)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(fraudnet_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fraudnet_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fraudnet_request_duration_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Kafka consumer lag (this service)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic) (kafka_consumergroup_lag{consumergroup=~\"$service.*\"})",
+          "legendFormat": "{{topic}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Kafka in/out (this service)",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic) (rate(fraudnet_kafka_messages_received_total{service=\"$service\"}[1m]))",
+          "legendFormat": "in: {{topic}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "sum by (topic) (rate(fraudnet_kafka_messages_sent_total{service=\"$service\"}[1m]))",
+          "legendFormat": "out: {{topic}}",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Feature-store read/write latency",
+      "description": "Aerospike read/write — sub-ms is the inline budget.",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fraudnet_feature_read_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p99 read",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fraudnet_feature_write_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p99 write",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Graph query latency",
+      "description": "Memgraph Bolt round-trip; >100 ms p99 should page (CLAUDE.md §11.2).",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(fraudnet_graph_query_seconds_bucket{service=\"$service\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

@@ -2,6 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/alerts.yaml
+
 scrape_configs:
   - job_name: otel-collector
     static_configs:
@@ -11,13 +14,28 @@ scrape_configs:
     static_configs:
       - targets: ["kafka:9101"]
 
+  # Services run inside the compose network; scrape them by container name.
   - job_name: services
     metrics_path: /metrics
     static_configs:
       - targets:
-          - "host.docker.internal:8000"   # api-public
-          - "host.docker.internal:8010"   # api-noc
-          - "host.docker.internal:8011"   # api-customer
-          - "host.docker.internal:8100"   # ingest-momo
-          - "host.docker.internal:8200"   # decisions
-          - "host.docker.internal:8400"   # compliance
+          - "ingest-momo:8100"
+          - "ingest-voice:8101"
+          - "ingest-sms:8102"
+          - "stream-features:8110"
+          - "stream-graph:8111"
+          - "decisions:8200"
+          - "action-tier1:8201"
+          - "action-tier2:8202"
+          - "brain-behavioural:8300"
+          - "brain-content:8301"
+          - "api-noc:8010"
+          - "api-customer:8011"
+          - "compliance:8400"
+        labels:
+          env: dev
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: "([^:]+):.*"
+        target_label: service
+        replacement: $1

@@ -1,0 +1,199 @@
+{
+  "title": "FraudNet — Fraud Operations",
+  "uid": "fraudnet-fraud-ops",
+  "description": "Business KPIs: signals/min, decisions/min, actions/min by tier. The dashboard the Fraud Lead opens during a shift.",
+  "tags": ["fraudnet", "operations", "fraud"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Signals / minute (now)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"fraud.signals.v1\"}[1m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Decisions / minute",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"decisions.dispatched.v1\"}[1m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Actions taken / minute",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"actions.taken.v1\"}[1m]))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Suppression rate",
+      "description": "Decisions dropped by the suppression key (e.g. dedup window). High = good (no spam); 100% = something is wrong.",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"decisions.dispatched.v1\",suppressed=\"true\"}[5m])) / clamp_min(sum(rate(fraudnet_kafka_messages_sent_total{topic=\"decisions.dispatched.v1\"}[5m])), 1e-9)",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Signals / minute (by source)",
+      "description": "Brain services produce SignalEventV1 — split by model id / source.",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "60 * sum by (service) (rate(fraudnet_kafka_messages_sent_total{topic=\"fraud.signals.v1\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Actions / minute by tier",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"action.tier1.v1\"}[1m]))",
+          "legendFormat": "tier 1 (inline)",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"action.tier2.v1\"}[1m]))",
+          "legendFormat": "tier 2 (NRT)",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "60 * sum(rate(fraudnet_kafka_messages_sent_total{topic=\"action.tier3.v1\"}[1m]))",
+          "legendFormat": "tier 3 (NOC)",
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Tier-1 actuator latency (inline path — sub-200 ms budget)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (route, le) (rate(fraudnet_request_duration_seconds_bucket{service=\"action-tier1\"}[5m])))",
+          "legendFormat": "p99 {{route}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (route, le) (rate(fraudnet_request_duration_seconds_bucket{service=\"action-tier1\"}[5m])))",
+          "legendFormat": "p50 {{route}}",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Decisions by policy",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "60 * sum by (policy) (rate(fraudnet_kafka_messages_sent_total{topic=\"decisions.dispatched.v1\"}[1m]))",
+          "legendFormat": "{{policy}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Brain p99 scoring latency",
+      "description": "Behavioural budget 5 ms p99; content fast-path < 1 ms; content model 30 ms.",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (service, le) (rate(fraudnet_request_duration_seconds_bucket{service=~\"brain-.*\"}[5m])))",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Graph mutation throughput",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(fraudnet_graph_mutations_flushed_total[1m]))",
+          "legendFormat": "flushed/s",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        },
+        {
+          "expr": "sum(rate(fraudnet_graph_mutations_dropped_total[1m]))",
+          "legendFormat": "dropped/s",
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" }
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    }
+  ]
+}

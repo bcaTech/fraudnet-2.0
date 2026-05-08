@@ -350,6 +350,7 @@ services:
     ports: ["9090:9090"]
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yaml:/etc/prometheus/alerts.yaml:ro
 
   grafana:
     <<: *restart

@@ -14,6 +14,37 @@ name: fraudnet-dev
 x-restart: &restart
   restart: unless-stopped
 
+# Shared dev-image build + env for all 13 application services. Production
+# images are per-service distroless (services/*/Dockerfile); the dev image
+# (Dockerfile.dev) keeps uv + workspace metadata so bind-mounted source runs
+# `uv run` without rebuilding on every code change.
+x-app-defaults: &app-defaults
+  <<: *restart
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  image: fraudnet/dev:latest
+  pull_policy: never
+  networks: [fraudnet]
+  volumes:
+    - ./packages:/workspace/packages
+    - ./services:/workspace/services
+    - ./scripts:/workspace/scripts:ro
+
+x-app-env: &app-env
+  FRAUDNET_ENV: dev
+  LOG_LEVEL: INFO
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  SCHEMA_REGISTRY_URL: http://schema-registry:8081
+  MEMGRAPH_URL: bolt://memgraph:7687
+  AEROSPIKE_HOSTS: aerospike:3000
+  POSTGRES_DSN: postgres://fraudnet:fraudnet_dev@postgres:5432/fraudnet
+  AUDIT_POSTGRES_DSN: postgres://fraudnet:fraudnet_dev@postgres:5432/fraudnet_audit
+  JWT_ISSUER: http://keycloak:8080/realms/fraudnet
+  JWKS_URL: http://keycloak:8080/realms/fraudnet/protocol/openid-connect/certs
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  PYTHONPATH: /workspace
+
 networks:
   fraudnet:
     name: fraudnet-dev
@@ -332,3 +363,403 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  # ============================================================================
+  # Application services (Phase 1).
+  #
+  # All 13 services share the dev image (Dockerfile.dev) and bind-mount their
+  # source for hot-reload. Production builds use per-service distroless images
+  # under services/*/Dockerfile.
+  #
+  # FastAPI services run uvicorn with --reload. Stream consumers and ingest
+  # services run as plain modules; their FastAPI side-cars expose /health and
+  # /metrics on the dev port. Code changes restart the watcher only for the
+  # FastAPI surface; consumer loops require a manual `docker compose restart
+  # <svc>` (acceptable for dev — the loops are short).
+  #
+  # Topology dependencies (kafka, postgres, memgraph, aerospike, redis) are
+  # health-gated. db-migrate and kafka-init must succeed before app services
+  # come online.
+  # ============================================================================
+
+  # ---- Ingestion services (Layer 1) -----------------------------------------
+
+  ingest-momo:
+    <<: *app-defaults
+    container_name: fraudnet-ingest-momo
+    ports: ["8100:8100"]
+    environment:
+      <<: *app-env
+      REDIS_URL: redis://redis:6379/0
+      INGEST_MOMO_HOST: 0.0.0.0
+      INGEST_MOMO_PORT: "8100"
+      MOMO_WEBHOOK_SHARED_SECRET: dev-momo-secret
+    command: >
+      uv run --package ingest-momo uvicorn ingest_momo.main:app
+      --host 0.0.0.0 --port 8100 --reload --reload-dir /workspace/services/ingest-momo
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  ingest-voice:
+    <<: *app-defaults
+    container_name: fraudnet-ingest-voice
+    ports: ["8101:8101"]
+    environment:
+      <<: *app-env
+      REDIS_URL: redis://redis:6379/1
+      INGEST_VOICE_HOST: 0.0.0.0
+      INGEST_VOICE_PORT: "8101"
+      VOICE_WEBHOOK_SHARED_SECRET: dev-voice-secret
+      VOICE_VENDOR_ID: dev-vendor
+    command: >
+      uv run --package ingest-voice uvicorn ingest_voice.main:app
+      --host 0.0.0.0 --port 8101 --reload --reload-dir /workspace/services/ingest-voice
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8101/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  ingest-sms:
+    <<: *app-defaults
+    container_name: fraudnet-ingest-sms
+    ports: ["8102:8102"]
+    environment:
+      <<: *app-env
+      REDIS_URL: redis://redis:6379/2
+      INGEST_SMS_HOST: 0.0.0.0
+      INGEST_SMS_PORT: "8102"
+      SMS_WEBHOOK_SHARED_SECRET: dev-sms-secret
+      SMS_SMSC_ID: dev-smsc
+      SMS_ALLOW_BODY_CAPTURE: "true"
+    command: >
+      uv run --package ingest-sms uvicorn ingest_sms.main:app
+      --host 0.0.0.0 --port 8102 --reload --reload-dir /workspace/services/ingest-sms
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8102/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # ---- Stream processing (Layer 2) ------------------------------------------
+  # Pure-Python consumers in Phase 1 (DECISIONS.md D-002). Phase 2 promotes to
+  # PyFlink on the Flink Kubernetes Operator.
+
+  stream-features:
+    <<: *app-defaults
+    container_name: fraudnet-stream-features
+    ports: ["8110:8110"]
+    environment:
+      <<: *app-env
+      STREAM_FEATURES_HEALTH_HOST: 0.0.0.0
+      STREAM_FEATURES_HEALTH_PORT: "8110"
+      STREAM_FEATURES_GROUP: stream-features-dev
+    command: uv run --package stream-features python -m stream_features
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      aerospike: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8110/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
+
+  stream-graph:
+    <<: *app-defaults
+    container_name: fraudnet-stream-graph
+    ports: ["8111:8111"]
+    environment:
+      <<: *app-env
+      STREAM_GRAPH_HEALTH_HOST: 0.0.0.0
+      STREAM_GRAPH_HEALTH_PORT: "8111"
+      STREAM_GRAPH_GROUP: stream-graph-dev
+    command: uv run --package stream-graph python -m stream_graph
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      memgraph: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8111/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
+
+  # ---- Brain services (Layer 3) ---------------------------------------------
+
+  brain-behavioural:
+    <<: *app-defaults
+    container_name: fraudnet-brain-behavioural
+    ports: ["8300:8300"]
+    environment:
+      <<: *app-env
+      BRAIN_BEHAVIOURAL_HOST: 0.0.0.0
+      BRAIN_BEHAVIOURAL_PORT: "8300"
+      BRAIN_BEHAVIOURAL_GROUP: brain-behavioural-dev
+    command: >
+      uv run --package brain-behavioural uvicorn brain_behavioural.main:app
+      --host 0.0.0.0 --port 8300 --reload --reload-dir /workspace/services/brain-behavioural
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      aerospike: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8300/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  brain-content:
+    <<: *app-defaults
+    container_name: fraudnet-brain-content
+    ports: ["8301:8301"]
+    environment:
+      <<: *app-env
+      BRAIN_CONTENT_HOST: 0.0.0.0
+      BRAIN_CONTENT_PORT: "8301"
+      BRAIN_CONTENT_GROUP: brain-content-dev
+    command: >
+      uv run --package brain-content uvicorn brain_content.main:app
+      --host 0.0.0.0 --port 8301 --reload --reload-dir /workspace/services/brain-content
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8301/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # ---- Decisions and actuators (Layer 4) ------------------------------------
+
+  decisions:
+    <<: *app-defaults
+    container_name: fraudnet-decisions
+    ports: ["8200:8200"]
+    environment:
+      <<: *app-env
+      DECISIONS_HOST: 0.0.0.0
+      DECISIONS_PORT: "8200"
+      DECISIONS_GROUP: decisions-dev
+      REDIS_URL: redis://redis:6379/3
+      DECISIONS_POLICY_DIR: /workspace/services/decisions/policies
+    command: >
+      uv run --package decisions uvicorn decisions.main:app
+      --host 0.0.0.0 --port 8200 --reload --reload-dir /workspace/services/decisions
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8200/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  action-tier1:
+    <<: *app-defaults
+    container_name: fraudnet-action-tier1
+    ports: ["8201:8201"]
+    environment:
+      <<: *app-env
+      ACTION_TIER1_HOST: 0.0.0.0
+      ACTION_TIER1_PORT: "8201"
+      ACTION_TIER1_GROUP: action-tier1-dev
+      VOLTE_TAG_URL: http://localhost:9999/volte/tag
+      URL_BLOCK_URL: http://localhost:9999/url/block
+      SMS_BLOCK_URL: http://localhost:9999/sms/block
+      MOMO_FRICTION_URL: http://localhost:9999/momo/friction
+      ACTUATOR_TOKEN: dev-actuator-token
+    command: >
+      uv run --package action-tier1 uvicorn action_tier1.main:app
+      --host 0.0.0.0 --port 8201 --reload --reload-dir /workspace/services/action-tier1
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8201/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  action-tier2:
+    <<: *app-defaults
+    container_name: fraudnet-action-tier2
+    ports: ["8202:8202"]
+    environment:
+      <<: *app-env
+      ACTION_TIER2_HOST: 0.0.0.0
+      ACTION_TIER2_PORT: "8202"
+      ACTION_TIER2_GROUP: action-tier2-dev
+      CUSTOMER_ALERT_URL: http://localhost:9999/alert
+      DO_I_KNOW_YOU_URL: http://localhost:9999/dikyou
+      MOMO_LIMIT_URL: http://localhost:9999/momo/limit
+      SAFEGUARD_URL: http://localhost:9999/safeguard
+      ACTUATOR_TOKEN: dev-actuator-token
+    command: >
+      uv run --package action-tier2 uvicorn action_tier2.main:app
+      --host 0.0.0.0 --port 8202 --reload --reload-dir /workspace/services/action-tier2
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8202/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # ---- Investigator and customer APIs ---------------------------------------
+
+  api-noc:
+    <<: *app-defaults
+    container_name: fraudnet-api-noc
+    ports: ["8010:8010"]
+    environment:
+      <<: *app-env
+      API_NOC_HOST: 0.0.0.0
+      API_NOC_PORT: "8010"
+      JWT_AUDIENCE: fraudnet-noc
+    command: >
+      uv run --package api-noc uvicorn api_noc.main:app
+      --host 0.0.0.0 --port 8010 --reload --reload-dir /workspace/services/api-noc
+      --reload-dir /workspace/packages
+    depends_on:
+      db-migrate: { condition: service_completed_successfully }
+      memgraph: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  api-customer:
+    <<: *app-defaults
+    container_name: fraudnet-api-customer
+    ports: ["8011:8011"]
+    environment:
+      <<: *app-env
+      API_CUSTOMER_HOST: 0.0.0.0
+      API_CUSTOMER_PORT: "8011"
+      REDIS_URL: redis://redis:6379/4
+      CUSTOMER_SESSION_SECRET: dev-customer-session-secret-change-me
+      OTP_SERVICE_URL: ""
+    command: >
+      uv run --package api-customer uvicorn api_customer.main:app
+      --host 0.0.0.0 --port 8011 --reload --reload-dir /workspace/services/api-customer
+      --reload-dir /workspace/packages
+    depends_on:
+      db-migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8011/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  compliance:
+    <<: *app-defaults
+    container_name: fraudnet-compliance
+    ports: ["8400:8400"]
+    environment:
+      <<: *app-env
+      COMPLIANCE_HOST: 0.0.0.0
+      COMPLIANCE_PORT: "8400"
+      COMPLIANCE_GROUP: compliance-dev
+    command: >
+      uv run --package compliance uvicorn compliance.main:app
+      --host 0.0.0.0 --port 8400 --reload --reload-dir /workspace/services/compliance
+      --reload-dir /workspace/packages
+    depends_on:
+      db-migrate: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8400/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================================
+  # One-shot bootstrappers — exit 0 once their job is done.
+  # App services depend on these via condition: service_completed_successfully.
+  # ============================================================================
+
+  kafka-init:
+    image: fraudnet/dev:latest
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: fraudnet-kafka-init
+    networks: [fraudnet]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TOPICS_FILE: /workspace/infra/kafka-topics/topics.yaml
+    volumes:
+      - ./infra/kafka-topics:/workspace/infra/kafka-topics:ro
+      - ./scripts:/workspace/scripts:ro
+    command: uv run python /workspace/scripts/create_topics.py
+    restart: "no"
+
+  db-migrate:
+    image: fraudnet/dev:latest
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: fraudnet-db-migrate
+    networks: [fraudnet]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: fraudnet
+      POSTGRES_PASSWORD: fraudnet_dev
+      POSTGRES_DB: fraudnet
+      AUDIT_DB: fraudnet_audit
+    volumes:
+      - ./services:/workspace/services:ro
+      - ./scripts:/workspace/scripts:ro
+    entrypoint: ["/bin/bash", "/workspace/scripts/run_migrations.sh"]
+    restart: "no"

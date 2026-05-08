@@ -1,0 +1,36 @@
+# Shared dev image — mounted-source, hot-reload.
+# Production images are per-service distroless (services/*/Dockerfile).
+# This image is intentionally NOT minimal: it carries uv, build toolchain, and
+# the workspace metadata so that volume-mounted source can run `uv run` against
+# a pre-resolved venv without rebuilding on every code change.
+
+ARG PYTHON_VERSION=3.12-slim-bookworm
+FROM python:${PYTHON_VERSION}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/workspace/.venv \
+    PATH="/workspace/.venv/bin:/root/.local/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates build-essential netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && mv /root/.local/bin/uv /usr/local/bin/uv && rm /uv-installer.sh
+
+WORKDIR /workspace
+
+# Pre-resolve the workspace deps so that `uv run` against mounted source is
+# cheap. The actual source is bind-mounted at runtime; only the metadata is
+# baked into the image.
+COPY pyproject.toml uv.lock* ./
+COPY packages ./packages
+COPY services ./services
+
+RUN uv sync --all-packages --all-extras || uv sync --all-packages
+
+# Default command is overridden per-service in docker-compose.dev.yml.
+CMD ["python", "-c", "print('override the command in compose')"]

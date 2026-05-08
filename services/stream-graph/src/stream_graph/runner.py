@@ -20,12 +20,19 @@ from fraudnet.kafka import AvroConsumer, AvroProducer, DLQRouter, KafkaSettings
 from fraudnet.kafka.consumer import ConsumedMessage
 from fraudnet.obs import counter, get_logger
 from fraudnet.schemas.events import (
+    DataEventV1,
     GraphMutationV1,
     MoMoEventV1,
     SmsEventV1,
     VoiceEventV1,
 )
-from stream_graph.pipeline import GraphOp, translate_momo, translate_sms, translate_voice
+from stream_graph.pipeline import (
+    GraphOp,
+    translate_data,
+    translate_momo,
+    translate_sms,
+    translate_voice,
+)
 
 _log = get_logger("stream_graph.runner")
 
@@ -81,12 +88,19 @@ class GraphRunner:
             model_cls=MoMoEventV1,
             dlq=DLQRouter(self._make_settings("stream-graph-dlq")),
         )
-        self._consumers = [voice, sms, momo]
+        data = AvroConsumer(
+            settings=self._make_settings("stream-graph-data"),
+            topic="data.events.v1",
+            model_cls=DataEventV1,
+            dlq=DLQRouter(self._make_settings("stream-graph-dlq")),
+        )
+        self._consumers = [voice, sms, momo, data]
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(voice.run(self._on_voice), name="consume-voice")
             tg.create_task(sms.run(self._on_sms), name="consume-sms")
             tg.create_task(momo.run(self._on_momo), name="consume-momo")
+            tg.create_task(data.run(self._on_data), name="consume-data")
             tg.create_task(self._stop.wait(), name="stop-signal")
 
     async def stop(self) -> None:
@@ -125,6 +139,15 @@ class GraphRunner:
             event_ts_ms=msg.payload.event_ts_ms,
             ingest_ts_ms=msg.payload.ingest_ts_ms,
             source_topic="momo.events.v1",
+        )
+
+    async def _on_data(self, msg: ConsumedMessage[DataEventV1]) -> None:
+        await self._dispatch(
+            translate_data(msg.payload),
+            event_id=msg.payload.event_id,
+            event_ts_ms=msg.payload.event_ts_ms,
+            ingest_ts_ms=msg.payload.ingest_ts_ms,
+            source_topic="data.events.v1",
         )
 
     # ------------------------------------------------------------------

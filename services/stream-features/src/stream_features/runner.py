@@ -17,7 +17,7 @@ from fraudnet.features import FeatureStore
 from fraudnet.kafka import AvroConsumer, ConsumerHandler, DLQRouter, KafkaSettings
 from fraudnet.kafka.consumer import ConsumedMessage
 from fraudnet.obs import counter, get_logger
-from fraudnet.schemas.events import MoMoEventV1, SmsEventV1, VoiceEventV1
+from fraudnet.schemas.events import DataEventV1, MoMoEventV1, SmsEventV1, VoiceEventV1
 from stream_features.pipeline import FeaturePipeline
 
 _log = get_logger("stream_features.runner")
@@ -66,12 +66,19 @@ class FeatureRunner:
             model_cls=MoMoEventV1,
             dlq=DLQRouter(self._make_settings("stream-features-dlq")),
         )
-        self._consumers = [voice, sms, momo]
+        data = AvroConsumer(
+            settings=self._make_settings("stream-features-data"),
+            topic="data.events.v1",
+            model_cls=DataEventV1,
+            dlq=DLQRouter(self._make_settings("stream-features-dlq")),
+        )
+        self._consumers = [voice, sms, momo, data]
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(voice.run(self._on_voice), name="consume-voice")
             tg.create_task(sms.run(self._on_sms), name="consume-sms")
             tg.create_task(momo.run(self._on_momo), name="consume-momo")
+            tg.create_task(data.run(self._on_data), name="consume-data")
             tg.create_task(self._stop.wait(), name="stop-signal")
 
     async def stop(self) -> None:
@@ -95,6 +102,12 @@ class FeatureRunner:
         if wf is not None:
             await self._store.put_wallet(wf, ttl_s=self._ttl)
         _PROCESSED.labels(topic="momo.events.v1").inc()
+
+    async def _on_data(self, msg: ConsumedMessage[DataEventV1]) -> None:
+        nf = self._pipeline.feed_data(msg.payload)
+        if nf is not None:
+            await self._store.put_number(nf, ttl_s=self._ttl)
+        _PROCESSED.labels(topic="data.events.v1").inc()
 
 
 def make_settings_factory(

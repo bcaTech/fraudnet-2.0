@@ -8,7 +8,13 @@ from typing import Any
 from uuid import uuid4
 
 from fraudnet.schemas.audit import AuditEventV1
-from fraudnet.schemas.events import MoMoEventType, MoMoEventV1, SmsEventV1, VoiceEventV1
+from fraudnet.schemas.events import (
+    DataEventV1,
+    MoMoEventType,
+    MoMoEventV1,
+    SmsEventV1,
+    VoiceEventV1,
+)
 from fraudnet.schemas.types import Purpose
 
 # MTN Ghana mobile prefixes (024, 054, 055, 059); Vodafone (020, 050);
@@ -92,6 +98,20 @@ def make_momo_event(**overrides: Any) -> MoMoEventV1:
     }
     payload.update(overrides)
     return MoMoEventV1.model_validate(payload)
+
+
+def make_data_event(**overrides: Any) -> DataEventV1:
+    payload = {
+        **_common(),
+        "kind": "dns_query",
+        "msisdn": fake_msisdn(),
+        "domain": "example.com",
+        "rdata": None,
+        "bytes_up": None,
+        "bytes_down": None,
+    }
+    payload.update(overrides)
+    return DataEventV1.model_validate(payload)
 
 
 def make_audit_event(

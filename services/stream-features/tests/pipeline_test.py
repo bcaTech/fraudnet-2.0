@@ -6,7 +6,12 @@ Aerospike. Same logic ports to the PyFlink Table-API wrapper.
 
 from __future__ import annotations
 
-from fraudnet.testing.factories import make_momo_event, make_sms_event, make_voice_event
+from fraudnet.testing.factories import (
+    make_data_event,
+    make_momo_event,
+    make_sms_event,
+    make_voice_event,
+)
 from stream_features.pipeline import FeaturePipeline
 
 
@@ -109,6 +114,68 @@ def test_unknown_number_returns_zero_features() -> None:
     nf = p.number_features("+233244444444")
     assert nf.velocity_1h == 0
     assert nf.imei_count == 0
+
+
+def test_data_dns_query_rate() -> None:
+    p = FeaturePipeline()
+    base = 1_700_000_000_000
+    msisdn = "+233241234567"
+    for i in range(7):
+        p.feed_data(make_data_event(
+            kind="dns_query",
+            msisdn=msisdn,
+            domain=f"site{i}.example.com",
+            event_ts_ms=base + i * 1_000,
+        ))
+    nf = p.number_features(msisdn)
+    assert nf.dns_query_rate_1h == 7
+    assert nf.suspicious_domain_count_1h == 0
+
+
+def test_data_suspicious_domain_counts() -> None:
+    blocklist = {"phish.example.com", "scam.tld"}
+    p = FeaturePipeline(suspicious_domains=blocklist)
+    base = 1_700_000_000_000
+    msisdn = "+233241234567"
+    p.feed_data(make_data_event(
+        kind="dns_query", msisdn=msisdn,
+        domain="phish.example.com", event_ts_ms=base,
+    ))
+    # subdomain match against blocklisted eTLD+1
+    p.feed_data(make_data_event(
+        kind="dns_query", msisdn=msisdn,
+        domain="login.scam.tld", event_ts_ms=base + 1_000,
+    ))
+    p.feed_data(make_data_event(
+        kind="dns_query", msisdn=msisdn,
+        domain="benign.example.org", event_ts_ms=base + 2_000,
+    ))
+    nf = p.number_features(msisdn)
+    assert nf.suspicious_domain_count_1h == 2
+    assert nf.dns_query_rate_1h == 3
+
+
+def test_data_volume_anomaly_ratio() -> None:
+    p = FeaturePipeline()
+    base = 1_700_000_000_000
+    msisdn = "+233241234567"
+    # baseline: many small sessions over the 7d window — but pruning keeps
+    # only 1h state for dvol_1h. Use an IPDR session inside the 1h window.
+    p.feed_data(make_data_event(
+        kind="ipdr_session", msisdn=msisdn, domain="cdn.example.com",
+        bytes_up=1000, bytes_down=10000, event_ts_ms=base,
+    ))
+    nf = p.number_features(msisdn)
+    assert nf.data_volume_1h_bytes == 11_000
+
+
+def test_data_unattributed_event_returns_none() -> None:
+    p = FeaturePipeline()
+    out = p.feed_data(make_data_event(
+        kind="dns_query", msisdn=None, domain="example.com",
+        event_ts_ms=1_700_000_000_000,
+    ))
+    assert out is None
 
 
 def test_pruning_drops_old_calls() -> None:

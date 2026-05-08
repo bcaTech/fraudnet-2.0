@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from fraudnet.schemas.events import (
+    DataEventV1,
     GraphMutationV1,
     MoMoEventType,
     MoMoEventV1,
@@ -130,6 +131,91 @@ def translate_sms(ev: SmsEventV1) -> list[GraphOp]:
             )
         )
     return out
+
+
+def translate_data(ev: DataEventV1) -> list[GraphOp]:
+    """Data event → MERGE Number / Domain / IPEndpoint, CREATE :QUERIED / :CONNECTED.
+
+    DNS query: (:Number)-[:QUERIED]->(:Domain).
+    DNS response with IP rdata: also emit (:Domain)-[:RESOLVED_TO]->(:IPEndpoint).
+    IPDR session: (:Number)-[:CONNECTED]->(:Domain | :IPEndpoint) with bytes.
+    """
+    out: list[GraphOp] = []
+
+    msisdn = ev.msisdn
+    if msisdn:
+        out.append(GraphOp(op="upsert_node", node_kind="Number", node_id=msisdn))
+
+    domain = ev.domain
+    if domain:
+        out.append(GraphOp(op="upsert_node", node_kind="Domain", node_id=domain))
+
+    if ev.kind in {"dns_query", "dns_response"}:
+        if msisdn and domain:
+            out.append(
+                GraphOp(
+                    op="upsert_edge",
+                    edge_kind="QUERIED",
+                    src_kind="Number",
+                    src_id=msisdn,
+                    dst_kind="Domain",
+                    dst_id=domain,
+                    properties={"ts": ev.event_ts_ms, "kind": ev.kind},
+                )
+            )
+        # On a DNS response the rdata can be an IP — record the resolution
+        # edge so brain-graph can pivot from a flagged domain to all IPs
+        # serving it (and vice versa).
+        if ev.kind == "dns_response" and ev.rdata and domain:
+            ip = ev.rdata
+            if _looks_like_ip(ip):
+                out.append(GraphOp(op="upsert_node", node_kind="IPEndpoint", node_id=ip))
+                out.append(
+                    GraphOp(
+                        op="upsert_edge",
+                        edge_kind="RESOLVED_TO",
+                        src_kind="Domain",
+                        src_id=domain,
+                        dst_kind="IPEndpoint",
+                        dst_id=ip,
+                        properties={"ts": ev.event_ts_ms},
+                    )
+                )
+
+    if ev.kind == "ipdr_session" and msisdn:
+        # Prefer domain attribution; fall back to IP. Connection edge carries
+        # bytes for downstream volume-anomaly aggregation.
+        dst_kind: str | None = None
+        dst_id: str | None = None
+        if domain:
+            dst_kind, dst_id = "Domain", domain
+        elif ev.rdata:
+            dst_kind, dst_id = "IPEndpoint", ev.rdata
+            out.append(GraphOp(op="upsert_node", node_kind="IPEndpoint", node_id=ev.rdata))
+        if dst_kind and dst_id:
+            out.append(
+                GraphOp(
+                    op="upsert_edge",
+                    edge_kind="CONNECTED",
+                    src_kind="Number",
+                    src_id=msisdn,
+                    dst_kind=dst_kind,
+                    dst_id=dst_id,
+                    properties={
+                        "ts": ev.event_ts_ms,
+                        "bytes_up": ev.bytes_up or 0,
+                        "bytes_down": ev.bytes_down or 0,
+                    },
+                )
+            )
+
+    return out
+
+
+def _looks_like_ip(s: str) -> bool:
+    # Tight enough — adapter has already canonicalised; this is just to
+    # avoid emitting an IPEndpoint for a CNAME-style rdata.
+    return ":" in s or (s.count(".") == 3 and all(p.isdigit() for p in s.split(".")))
 
 
 def translate_momo(ev: MoMoEventV1) -> list[GraphOp]:

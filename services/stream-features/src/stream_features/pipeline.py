@@ -22,6 +22,7 @@ from typing import Iterable
 
 from fraudnet.features.snapshot import NumberFeatures, WalletFeatures
 from fraudnet.schemas.events import (
+    DataEventV1,
     MoMoEventType,
     MoMoEventV1,
     SmsEventV1,
@@ -33,6 +34,11 @@ _W1M = 60 * 1000
 _W5M = 5 * 60 * 1000
 _W1H = 60 * 60 * 1000
 _W24H = 24 * 60 * 60 * 1000
+# Baseline (typical-traffic) window for the data-volume anomaly signal.
+# 7d gives a stable per-subscriber baseline that absorbs day-of-week
+# variation; we use a rolling mean rather than a true distribution to
+# keep state small (per-subscriber sum + count is enough).
+_W7D = 7 * 24 * 60 * 60 * 1000
 
 # Default watermark lateness — events older than this past the high watermark
 # on a key are considered late and dropped.
@@ -49,6 +55,14 @@ class _NumberState:
     sms_times: deque[int] = field(default_factory=deque)
     sms_template_hashes: deque[tuple[int, str]] = field(default_factory=deque)
     imeis_30d: dict[str, int] = field(default_factory=dict)            # imei → last_seen_ts
+    # Phase 3 — data signals.
+    dns_query_times: deque[int] = field(default_factory=deque)
+    suspicious_dns_times: deque[int] = field(default_factory=deque)
+    data_volume_1h: deque[tuple[int, int]] = field(default_factory=deque)   # (ts, bytes)
+    # Rolling 7d baseline kept as (ts, bytes) so we can prune cheaply.
+    # We compute the baseline as mean-bytes-per-hour to compare against
+    # data_volume_1h_bytes; bias is acceptable for the anomaly signal.
+    data_volume_baseline: deque[tuple[int, int]] = field(default_factory=deque)
 
 
 @dataclass
@@ -67,11 +81,25 @@ class FeaturePipeline:
     Kafka consumer.
     """
 
-    def __init__(self, *, watermark_lateness_ms: int = DEFAULT_LATENESS_MS) -> None:
+    def __init__(
+        self,
+        *,
+        watermark_lateness_ms: int = DEFAULT_LATENESS_MS,
+        suspicious_domains: set[str] | None = None,
+    ) -> None:
         self._numbers: dict[str, _NumberState] = {}
         self._wallets: dict[str, _WalletState] = {}
         self._lateness = watermark_lateness_ms
+        # The suspicious domain set is hot-loaded from brain-content's
+        # blocklist + newly-registered list. The pipeline accepts it
+        # by reference so the runner can update it in-place between
+        # refreshes without rebuilding state.
+        self._suspicious = suspicious_domains if suspicious_domains is not None else set()
         self.late_events_dropped = 0
+
+    @property
+    def suspicious_domains(self) -> set[str]:
+        return self._suspicious
 
     # ------------------------------------------------------------------
     # Voice
@@ -108,6 +136,50 @@ class FeaturePipeline:
 
         self._prune_number(ns, ev.event_ts_ms)
         return self._compute_number_features(ev.sender, ns, ev.event_ts_ms)
+
+    # ------------------------------------------------------------------
+    # Data (DNS / IPDR) — Phase 3
+    # ------------------------------------------------------------------
+    def feed_data(self, ev: DataEventV1) -> NumberFeatures | None:
+        """Update DNS-rate / suspicious-domain / volume features.
+
+        Returns None for unattributed events (no MSISDN); they still inform
+        domain-level reputation in stream-graph but do not move per-subscriber
+        feature state.
+        """
+        if not ev.msisdn:
+            return None
+        ns = self._numbers.setdefault(ev.msisdn, _NumberState())
+        if self._is_late(ns.high_ts_ms, ev.event_ts_ms):
+            self.late_events_dropped += 1
+            return self.number_features(ev.msisdn)
+        ns.high_ts_ms = max(ns.high_ts_ms, ev.event_ts_ms)
+
+        if ev.kind in {"dns_query", "dns_response"} and ev.domain:
+            ns.dns_query_times.append(ev.event_ts_ms)
+            if self._is_suspicious(ev.domain):
+                ns.suspicious_dns_times.append(ev.event_ts_ms)
+        elif ev.kind == "ipdr_session":
+            total_bytes = (ev.bytes_up or 0) + (ev.bytes_down or 0)
+            if total_bytes > 0:
+                ns.data_volume_1h.append((ev.event_ts_ms, total_bytes))
+                ns.data_volume_baseline.append((ev.event_ts_ms, total_bytes))
+
+        self._prune_number(ns, ev.event_ts_ms)
+        return self._compute_number_features(ev.msisdn, ns, ev.event_ts_ms)
+
+    def _is_suspicious(self, domain: str) -> bool:
+        # Membership check covers exact-match blocklist; domains land here
+        # already canonicalised (lowercase, A-label) by the ingest adapter.
+        if domain in self._suspicious:
+            return True
+        # Suffix match — eTLD+1 entries match all subdomains. Cheap because
+        # most domains are short (label count < 10).
+        labels = domain.split(".")
+        for i in range(1, len(labels)):
+            if ".".join(labels[i:]) in self._suspicious:
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # MoMo
@@ -168,7 +240,8 @@ class FeaturePipeline:
 
     def _prune_number(self, ns: _NumberState, now_ms: int) -> None:
         # Drop entries older than the longest window we use (30d for IMEI,
-        # 1h for fanout/calls/sms). IMEIs are dict-pruned at compute time.
+        # 1h for fanout/calls/sms, 7d for data baseline). IMEIs are
+        # dict-pruned at compute time.
         h_cut = now_ms - _W1H
         while ns.call_times and ns.call_times[0] < (now_ms - _W1H):
             ns.call_times.popleft()
@@ -178,6 +251,15 @@ class FeaturePipeline:
             ns.sms_times.popleft()
         while ns.sms_template_hashes and ns.sms_template_hashes[0][0] < h_cut:
             ns.sms_template_hashes.popleft()
+        while ns.dns_query_times and ns.dns_query_times[0] < h_cut:
+            ns.dns_query_times.popleft()
+        while ns.suspicious_dns_times and ns.suspicious_dns_times[0] < h_cut:
+            ns.suspicious_dns_times.popleft()
+        while ns.data_volume_1h and ns.data_volume_1h[0][0] < h_cut:
+            ns.data_volume_1h.popleft()
+        baseline_cut = now_ms - _W7D
+        while ns.data_volume_baseline and ns.data_volume_baseline[0][0] < baseline_cut:
+            ns.data_volume_baseline.popleft()
         # IMEIs use a 30-day lookback — we keep the dict bounded.
         cutoff = now_ms - 30 * 24 * 60 * 60 * 1000
         for imei in [k for k, ts in ns.imeis_30d.items() if ts < cutoff]:
@@ -205,6 +287,17 @@ class FeaturePipeline:
         for _, h in ns.sms_template_hashes:
             template_counts[h] = template_counts.get(h, 0) + 1
         top = max(template_counts.items(), key=lambda kv: kv[1])[0] if template_counts else None
+        dns_qrate_1h = len(ns.dns_query_times)
+        susp_dom_1h = len(ns.suspicious_dns_times)
+        dvol_1h = sum(b for _, b in ns.data_volume_1h)
+        # Baseline is mean per-hour bytes over the 7d window. We approximate
+        # by dividing the 7d sum by 168 hours; underweights cold-start
+        # subscribers but converges quickly.
+        if ns.data_volume_baseline:
+            base_total = sum(b for _, b in ns.data_volume_baseline)
+            dvol_base = base_total // 168
+        else:
+            dvol_base = 0
         return NumberFeatures(
             msisdn=msisdn,
             velocity_1m=v1m,
@@ -215,6 +308,10 @@ class FeaturePipeline:
             geo_entropy=0.0,  # placeholder — computed when cell_id stream lands
             sms_freq_1h=sms_1h,
             sms_template_top=top,
+            dns_query_rate_1h=dns_qrate_1h,
+            suspicious_domain_count_1h=susp_dom_1h,
+            data_volume_1h_bytes=dvol_1h,
+            data_volume_baseline_bytes=dvol_base,
         )
 
     def _compute_wallet_features(

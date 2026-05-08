@@ -34,6 +34,14 @@ class NumberFeatures:
     # from sms.events.v1. Brain-behavioural exempts these from IMEI-churn
     # signals: legitimate businesses rotate SMS-routing infrastructure.
     rcs_verified_recent: bool = False
+    # OTT / data signals (Phase 3) — fed by data.events.v1.
+    dns_query_rate_1h: int = 0
+    suspicious_domain_count_1h: int = 0
+    data_volume_1h_bytes: int = 0
+    # Mean(bytes_up + bytes_down) over a longer baseline window. The ratio
+    # data_volume_1h_bytes / data_volume_baseline_bytes drives the volume
+    # anomaly signal in brain-behavioural.
+    data_volume_baseline_bytes: int = 0
     last_score: float | None = None
     last_score_at_ms: int | None = None
 
@@ -50,6 +58,10 @@ class NumberFeatures:
             sms_freq_1h=int(bins.get("sms_freq_1h", 0)),
             sms_template_top=bins.get("smshash_top"),
             rcs_verified_recent=bool(bins.get("rcs_verified", False)),
+            dns_query_rate_1h=int(bins.get("dns_qrate_1h", 0)),
+            suspicious_domain_count_1h=int(bins.get("susp_dom_1h", 0)),
+            data_volume_1h_bytes=int(bins.get("dvol_1h", 0)),
+            data_volume_baseline_bytes=int(bins.get("dvol_base", 0)),
             last_score=bins.get("last_score"),
             last_score_at_ms=bins.get("last_score_at"),
         )
@@ -65,9 +77,25 @@ class NumberFeatures:
             "sms_freq_1h": self.sms_freq_1h,
             "smshash_top": self.sms_template_top,
             "rcs_verified": self.rcs_verified_recent,
+            "dns_qrate_1h": self.dns_query_rate_1h,
+            "susp_dom_1h": self.suspicious_domain_count_1h,
+            "dvol_1h": self.data_volume_1h_bytes,
+            "dvol_base": self.data_volume_baseline_bytes,
             "last_score": self.last_score,
             "last_score_at": self.last_score_at_ms,
         }
+
+    @property
+    def data_volume_anomaly(self) -> float:
+        """Ratio of recent volume to baseline; 1.0 when matched, >1 when high.
+
+        Returns 0.0 when there is no baseline yet (cold-start), so the model
+        can treat the absence of a baseline as a no-op rather than as
+        suspicious.
+        """
+        if self.data_volume_baseline_bytes <= 0:
+            return 0.0
+        return self.data_volume_1h_bytes / self.data_volume_baseline_bytes
 
 
 @dataclass(frozen=True)

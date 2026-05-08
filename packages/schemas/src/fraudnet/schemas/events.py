@@ -206,10 +206,24 @@ class GraphMutationV1(_EventBase):
     topic: ClassVar[str] = "graph.mutations.v1"
 
     op: Literal["upsert_node", "upsert_edge", "delete_node", "delete_edge"]
-    node_kind: Literal["Number", "Wallet", "Device", "Account", "Ring"] | None = None
+    node_kind: (
+        Literal["Number", "Wallet", "Device", "Account", "Ring", "Domain", "IPEndpoint"] | None
+    ) = None
     node_id: str | None = None
     edge_kind: (
-        Literal["CALLED", "SMSED", "SENT", "OWNS", "USED", "CASHED_OUT_TO", "MEMBER_OF"] | None
+        Literal[
+            "CALLED",
+            "SMSED",
+            "SENT",
+            "OWNS",
+            "USED",
+            "CASHED_OUT_TO",
+            "MEMBER_OF",
+            "QUERIED",
+            "CONNECTED",
+            "RESOLVED_TO",
+        ]
+        | None
     ) = None
     src_kind: str | None = None
     src_id: str | None = None

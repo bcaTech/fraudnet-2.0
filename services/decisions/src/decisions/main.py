@@ -13,6 +13,7 @@ from fraudnet.obs import configure_logging, configure_tracing, get_logger, metri
 from fraudnet.schemas.events import DecisionDispatchedV1
 from fraudnet.schemas.types import LatencyTier
 from decisions.dispatcher import DecisionDispatcher
+from decisions.hot_reload import PolicyHotReloader
 from decisions.policy import Policy, discover_default_policy, load_all
 from decisions.runner import DecisionRunner, make_settings_factory
 from decisions.settings import Settings
@@ -88,12 +89,34 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
         app.state.policy = policy
         app.state.runner = runner
+
+        # Hot-reload bound to the same directory the policy was loaded from.
+        from pathlib import Path
+        policy_dir = Path(settings.policy_dir) if settings.policy_dir else (
+            Path(__file__).resolve().parent.parent / "policies"
+        )
+        reloader = PolicyHotReloader(
+            directory=policy_dir,
+            dispatcher=dispatcher,
+            runner=runner,
+        )
+        reloader.record_initial(policy)
+
+        def _on_policy_change(new_policy: Policy) -> None:
+            app.state.policy = new_policy
+
+        reloader.on_change(_on_policy_change)
+        if settings.policy_hot_reload:
+            reloader.start()
+        app.state.reloader = reloader
+
         runner_task = asyncio.create_task(runner.start(), name="decisions-runner")
         _log.info("decisions.started", env=settings.env)
         try:
             yield
         finally:
             _log.info("decisions.stopping")
+            reloader.stop()
             await runner.stop()
             await audit_producer.stop()
             for p in tier_producers.values():
@@ -139,6 +162,43 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
                 }
                 for r in policy.rules
             ],
+        }
+
+    @app.get("/policy/history")
+    async def policy_history() -> dict[str, object]:
+        reloader: PolicyHotReloader | None = getattr(app.state, "reloader", None)
+        if reloader is None:
+            return {"history": []}
+        return {
+            "history": [
+                {
+                    "id": v.id,
+                    "version": v.version,
+                    "fingerprint": v.fingerprint,
+                    "rule_count": v.rule_count,
+                    "loaded_at_ms": v.loaded_at_ms,
+                    "source_files": list(v.source_files),
+                }
+                for v in reversed(reloader.history)
+            ]
+        }
+
+    @app.post("/policy/reload")
+    async def policy_reload() -> dict[str, object]:
+        """Trigger an immediate reload from disk. Useful when the watcher
+        is disabled or for forcing a reload after a config-map update in K8s."""
+        reloader: PolicyHotReloader | None = getattr(app.state, "reloader", None)
+        if reloader is None:
+            return {"status": "no_reloader"}
+        version = reloader.reload_now()
+        if version is None:
+            return {"status": "noop_or_invalid"}
+        return {
+            "status": "applied",
+            "id": version.id,
+            "version": version.version,
+            "fingerprint": version.fingerprint,
+            "rule_count": version.rule_count,
         }
 
     @app.get("/metrics", include_in_schema=False)

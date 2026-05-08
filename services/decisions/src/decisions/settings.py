@@ -19,6 +19,7 @@ class Settings:
     redis_url: str = "redis://localhost:6379/3"
 
     policy_dir: str = ""  # empty → use bundled default
+    policy_hot_reload: bool = True
 
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8200
@@ -33,6 +34,7 @@ class Settings:
             consumer_group=os.environ.get("DECISIONS_GROUP", "decisions"),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/3"),
             policy_dir=os.environ.get("DECISIONS_POLICY_DIR", ""),
+            policy_hot_reload=os.environ.get("DECISIONS_POLICY_HOT_RELOAD", "1") == "1",
             host=os.environ.get("DECISIONS_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("DECISIONS_PORT", "8200")),
         )

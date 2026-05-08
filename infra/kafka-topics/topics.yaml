@@ -1,0 +1,93 @@
+# Declarative Kafka topic definitions. Authoritative for both dev and prod;
+# applied via scripts/kafka_topics_apply.sh (`make kafka-topics-create`).
+#
+# Versioned by suffix (.v1). Breaking schema changes require a new topic and a
+# dual-publish migration — never repurpose a topic.
+
+defaults:
+  replication_factor: 1   # dev; production manifests override to 3
+  config:
+    compression.type: zstd
+    min.insync.replicas: 1
+    cleanup.policy: delete
+
+topics:
+  # ---- Ingestion topics (CLAUDE.md §6.3) ----
+  - name: voice.events.v1
+    partitions: 100
+    config:
+      retention.ms: 604800000          # 7d
+
+  - name: sms.events.v1
+    partitions: 50
+    config:
+      retention.ms: 604800000          # 7d
+
+  - name: data.events.v1
+    partitions: 50
+    config:
+      retention.ms: 259200000          # 3d
+
+  - name: momo.events.v1
+    partitions: 50
+    config:
+      retention.ms: 2592000000         # 30d
+
+  - name: intel.events.v1
+    partitions: 10
+    config:
+      retention.ms: 7776000000         # 90d
+
+  # ---- Stream-processing outputs ----
+  - name: graph.mutations.v1
+    partitions: 50
+    config:
+      retention.ms: 2592000000         # 30d
+
+  - name: motifs.detected.v1
+    partitions: 20
+    config:
+      retention.ms: 7776000000         # 90d
+
+  # ---- Decisions and actions ----
+  - name: decisions.dispatched.v1
+    partitions: 50
+    config:
+      retention.ms: 2592000000         # 30d
+
+  - name: actions.taken.v1
+    partitions: 20
+    config:
+      retention.ms: 7776000000         # 90d
+
+  # ---- Cross-cutting ----
+  - name: audit.events.v1
+    partitions: 20
+    config:
+      retention.ms: 2592000000         # 30d (then archived to Iceberg)
+
+  # ---- Dead-letter topics (one per ingest source) ----
+  - name: voice.events.dlq.v1
+    partitions: 5
+    config:
+      retention.ms: 2592000000
+
+  - name: sms.events.dlq.v1
+    partitions: 5
+    config:
+      retention.ms: 2592000000
+
+  - name: data.events.dlq.v1
+    partitions: 5
+    config:
+      retention.ms: 2592000000
+
+  - name: momo.events.dlq.v1
+    partitions: 5
+    config:
+      retention.ms: 2592000000
+
+  - name: intel.events.dlq.v1
+    partitions: 5
+    config:
+      retention.ms: 2592000000

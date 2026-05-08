@@ -525,6 +525,7 @@ services:
       BRAIN_BEHAVIOURAL_HOST: 0.0.0.0
       BRAIN_BEHAVIOURAL_PORT: "8300"
       BRAIN_BEHAVIOURAL_GROUP: brain-behavioural-dev
+      BUSINESS_REGISTRY_URL: http://business-registry:8313
     command: >
       uv run --package brain-behavioural uvicorn brain_behavioural.main:app
       --host 0.0.0.0 --port 8300 --reload --reload-dir /workspace/services/brain-behavioural
@@ -550,6 +551,7 @@ services:
       BRAIN_CONTENT_PORT: "8301"
       BRAIN_CONTENT_GROUP: brain-content-dev
       URL_INTEL_URL: http://url-intel:8312
+      BUSINESS_REGISTRY_URL: http://business-registry:8313
     command: >
       uv run --package brain-content uvicorn brain_content.main:app
       --host 0.0.0.0 --port 8301 --reload --reload-dir /workspace/services/brain-content
@@ -559,6 +561,31 @@ services:
       schema-registry: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8301/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  business-registry:
+    <<: *app-defaults
+    container_name: fraudnet-business-registry
+    ports: ["8313:8313"]
+    environment:
+      <<: *app-env
+      BUSINESS_REGISTRY_HOST: 0.0.0.0
+      BUSINESS_REGISTRY_PORT: "8313"
+      BUSINESS_REGISTRY_DB_URL: postgresql://fraudnet:fraudnet_dev@postgres:5432/fraudnet
+      BUSINESS_REGISTRY_REDIS_URL: redis://redis:6379/5
+    command: >
+      uv run --package business-registry uvicorn business_registry.main:app
+      --host 0.0.0.0 --port 8313 --reload --reload-dir /workspace/services/business-registry
+      --reload-dir /workspace/packages
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      db-migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8313/health/live', timeout=2).status==200 else 1)\""]
       interval: 10s
       timeout: 3s
       retries: 5

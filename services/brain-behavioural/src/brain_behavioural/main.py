@@ -13,6 +13,11 @@ from fraudnet.schemas.signals import SignalEventV1
 from brain_behavioural.api import router
 from brain_behavioural.lgbm_scorer import LightGBMScorer
 from brain_behavioural.runner import BehaviouralRunner, make_settings_factory
+from business_registry.client import (
+    BusinessRegistryClient,
+    HttpBusinessRegistryClient,
+    NoopBusinessRegistryClient,
+)
 from brain_behavioural.scorer import HeuristicScorer, Scorer
 from brain_behavioural.settings import Settings
 
@@ -94,6 +99,14 @@ def create_app(
         )
         await producer.start()
 
+        registry_client: BusinessRegistryClient
+        if settings.business_registry_url:
+            registry_client = HttpBusinessRegistryClient(
+                base_url=settings.business_registry_url
+            )
+        else:
+            registry_client = NoopBusinessRegistryClient()
+
         runner = BehaviouralRunner(
             scorer=scorer_inst,
             feature_store=store,
@@ -103,6 +116,7 @@ def create_app(
                 schema_registry_url=settings.schema_registry_url,
                 group_id=settings.consumer_group,
             ),
+            business_registry=registry_client,
         )
         app.state.scorer = scorer_inst
         app.state.feature_store = store

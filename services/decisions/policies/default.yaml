@@ -5,6 +5,19 @@ id: default
 version: "2026-05-08-1"
 
 rules:
+  # ---- Verified-business override (must be first) ----
+  # Any signal whose evidence carries `verified_business: true` skips
+  # Tier-1 / Tier-2 actuators and lands directly in the NOC investigation
+  # queue for analyst review. This is the policy-side defence against
+  # false positives on banks/MNOs/OTP senders. Brain-* services already
+  # discount the score; this rule is the belt-and-braces guarantee.
+  - id: verified-business-suppress
+    match:
+      evidence_truthy: [verified_business]
+    action: investigation.queue
+    tier: tier3
+    suppression_window_s: 86400
+
   # ---- Tier 1: inline ----
   - id: voice-velocity-burst-tier1
     match:

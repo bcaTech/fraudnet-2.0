@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from business_registry.client import BusinessRegistryClient, NoopBusinessRegistryClient
 from fraudnet.kafka import AvroConsumer, AvroProducer, DLQRouter, KafkaSettings
 from fraudnet.kafka.consumer import ConsumedMessage
 from fraudnet.obs import counter, get_logger
@@ -23,6 +24,10 @@ _CLASSIFIED = counter(
     "SMS events classified.",
     labelnames=("fired", "with_body"),
 )
+_VERIFIED_SUPPRESSED = counter(
+    "brain_content_verified_short_code_suppressed_total",
+    "SMS signals suppressed because the sender short-code is a verified business.",
+)
 
 
 class ContentRunner:
@@ -32,10 +37,12 @@ class ContentRunner:
         classifier: ContentClassifier,
         signal_producer: AvroProducer[SignalEventV1],
         kafka_settings_factory,
+        business_registry: BusinessRegistryClient | None = None,
     ) -> None:
         self._classifier = classifier
         self._producer = signal_producer
         self._make_settings = kafka_settings_factory
+        self._registry = business_registry or NoopBusinessRegistryClient()
         self._stop = asyncio.Event()
         self._consumer: object | None = None
 
@@ -54,6 +61,7 @@ class ContentRunner:
         if self._consumer is not None:
             self._consumer.stop()  # type: ignore[attr-defined]
         await self._producer.stop()
+        await self._registry.aclose()
 
     async def _on_sms(self, msg: ConsumedMessage[SmsEventV1]) -> None:
         ev = msg.payload
@@ -61,11 +69,45 @@ class ContentRunner:
         # primary smishing surface.
         if ev.kind != "mt":
             return
+
+        # Trust boost: verified short-code senders get their score capped
+        # so they never trigger Tier-1/Tier-2 actions. We still classify
+        # so the signal lands on the audit trail with `verified_business`
+        # evidence — analyst tooling uses it to monitor false-positive
+        # patterns per business.
+        verified_business: dict[str, str] | None = None
+        if ev.short_code:
+            try:
+                lookup = await self._registry.lookup_shortcode(ev.short_code)
+                if lookup.is_verified:
+                    verified_business = {
+                        "id": lookup.business_id or "",
+                        "name": lookup.business_name or "",
+                    }
+            except Exception:  # noqa: BLE001
+                pass
+
         result = self._classifier.classify(
             body=ev.body,
             body_hash=ev.body_hash,
             template_hash=ev.template_hash,
         )
+
+        if verified_business is not None and result.signal_kind is not None:
+            _VERIFIED_SUPPRESSED.inc()
+            # Surface in evidence but do not propagate as a signal.
+            _log.info(
+                "brain_content.verified_short_code_suppressed",
+                short_code=ev.short_code,
+                business=verified_business["name"],
+                original_signal_kind=result.signal_kind,
+            )
+            _CLASSIFIED.labels(
+                fired="false",
+                with_body=str(ev.body is not None).lower(),
+            ).inc()
+            return
+
         signal = to_signal(
             result=result,
             sender_msisdn=ev.sender,

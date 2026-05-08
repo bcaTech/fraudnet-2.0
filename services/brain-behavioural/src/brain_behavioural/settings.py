@@ -18,6 +18,10 @@ class Settings:
 
     aerospike_hosts: str = "localhost:3010"
 
+    # Optional verified-business registry — when set, runner discounts
+    # scores for verified senders before signal emission.
+    business_registry_url: str = ""
+
     use_model_registry: bool = True
     model_registry_endpoint: str = "http://localhost:9000"
     model_registry_bucket: str = "fraudnet-models"
@@ -36,6 +40,7 @@ class Settings:
             schema_registry_url=os.environ.get("SCHEMA_REGISTRY_URL", "http://localhost:8081"),
             consumer_group=os.environ.get("BRAIN_BEHAVIOURAL_GROUP", "brain-behavioural"),
             aerospike_hosts=os.environ.get("AEROSPIKE_HOSTS", "localhost:3010"),
+            business_registry_url=os.environ.get("BUSINESS_REGISTRY_URL", ""),
             use_model_registry=os.environ.get("BRAIN_BEHAVIOURAL_USE_REGISTRY", "1") == "1",
             model_registry_endpoint=os.environ.get(
                 "MODEL_REGISTRY_ENDPOINT", "http://localhost:9000"

@@ -53,6 +53,10 @@ def _graph(request: Request) -> GraphClient:
     return request.app.state.graph  # type: ignore[no-any-return]
 
 
+def _db(request: Request) -> Database:
+    return request.app.state.db  # type: ignore[no-any-return]
+
+
 def _principal(request: Request) -> Principal:
     p = getattr(request.state, "principal", None)
     if p is None:
@@ -769,6 +773,65 @@ async def transition_takedown(
             metadata={"target": body.target, "filed_with": body.filed_with or ""},
         )
         return row
+
+
+# ----- False-positive monitoring (verified businesses) -----
+
+
+class BusinessFpRow(BaseModel):
+    business_id: str
+    business_name: str | None = None
+    window_start: str
+    alerts_total: int
+    alerts_fp: int
+    fp_rate: float
+
+
+@router.get("/false-positives/businesses", response_model=list[BusinessFpRow])
+async def false_positives_by_business(
+    repo: Annotated[Database, Depends(_db)],
+    principal: Annotated[Principal, Depends(_principal)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    window_days: Annotated[int, Query(ge=1, le=90)] = 30,
+) -> list[BusinessFpRow]:
+    """Verified businesses with the highest false-positive rates.
+
+    Joins business_registry.business_false_positives + the businesses
+    table over the last `window_days`. Used by analysts to tune
+    classifier thresholds and to spot mislabelled FPs.
+    """
+    with with_purpose(Purpose.FRAUD_PREVENTION):
+        async with repo.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT bfp.business_id::text AS business_id,
+                       b.name              AS business_name,
+                       to_char(bfp.window_start, 'YYYY-MM-DD') AS window_start,
+                       bfp.alerts_total    AS alerts_total,
+                       bfp.alerts_fp       AS alerts_fp,
+                       bfp.fp_rate         AS fp_rate
+                  FROM business_false_positives bfp
+                  JOIN businesses b ON b.id = bfp.business_id
+                 WHERE bfp.window_start >= now() - ($1::int || ' days')::interval
+                   AND b.tenant_id = $2
+              ORDER BY bfp.fp_rate DESC, bfp.alerts_total DESC
+                 LIMIT $3
+                """,
+                window_days,
+                principal.tenant_id,
+                limit,
+            )
+        return [
+            BusinessFpRow(
+                business_id=r["business_id"],
+                business_name=r["business_name"],
+                window_start=r["window_start"],
+                alerts_total=int(r["alerts_total"]),
+                alerts_fp=int(r["alerts_fp"]),
+                fp_rate=float(r["fp_rate"]),
+            )
+            for r in rows
+        ]
 
 
 # Re-export for tests

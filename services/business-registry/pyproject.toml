@@ -1,28 +1,22 @@
 [project]
-name = "brain-content"
+name = "business-registry"
 version = "0.1.0"
-description = "SMS content classification — URL reputation + template patterns"
+description = "Verified business sender registry — MSISDNs and short codes"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
-  "scikit-learn>=1.5",
+  "asyncpg>=0.30",
+  "redis>=5.2",
   "fraudnet-schemas",
   "fraudnet-obs",
-  "fraudnet-kafka",
   "fraudnet-audit",
-  "fraudnet-model-registry",
-  "business-registry",
-  "httpx>=0.28",
 ]
 
 [tool.uv.sources]
 fraudnet-schemas = { workspace = true }
 fraudnet-obs = { workspace = true }
-fraudnet-kafka = { workspace = true }
 fraudnet-audit = { workspace = true }
-fraudnet-model-registry = { workspace = true }
-business-registry = { workspace = true }
 
 [dependency-groups]
 dev = ["fraudnet-testing", "httpx>=0.28"]
@@ -35,4 +29,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/brain_content"]
+packages = ["src/business_registry"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"migrations" = "business_registry/migrations"

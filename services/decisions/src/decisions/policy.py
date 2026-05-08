@@ -41,6 +41,10 @@ class _Match:
     severity_in: tuple[Severity, ...] | None = None
     score_gte: float | None = None
     subject_kind: str | None = None
+    # Evidence-based predicates. Each entry asserts the named evidence
+    # key is truthy on the signal; useful for cross-cutting predicates
+    # like `verified_business`.
+    evidence_truthy: tuple[str, ...] = ()
 
     def matches_signal(self, sig: SignalEventV1) -> bool:
         if self.motif is not None:
@@ -53,6 +57,9 @@ class _Match:
             return False
         if self.subject_kind is not None and sig.subject.kind.value != self.subject_kind:
             return False
+        for k in self.evidence_truthy:
+            if not sig.evidence.get(k):
+                return False
         return True
 
     def matches_motif(self, m: MotifDetectedV1) -> bool:
@@ -61,6 +68,10 @@ class _Match:
         if self.motif is not None and m.motif != self.motif:
             return False
         if self.score_gte is not None and (m.score is None or m.score.value < self.score_gte):
+            return False
+        # Motif events do not carry the evidence dict in the same shape;
+        # evidence-truthy predicates do not match against motifs.
+        if self.evidence_truthy:
             return False
         return True
 
@@ -101,6 +112,9 @@ class Policy:
             m = r.get("match", {}) or {}
             sev = m.get("severity_in")
             severity_in = tuple(Severity(s) for s in sev) if sev else None
+            evidence_truthy = m.get("evidence_truthy") or ()
+            if isinstance(evidence_truthy, str):
+                evidence_truthy = (evidence_truthy,)
             rules.append(
                 Rule(
                     id=str(r["id"]),
@@ -110,6 +124,7 @@ class Policy:
                         severity_in=severity_in,
                         score_gte=float(m["score_gte"]) if m.get("score_gte") is not None else None,
                         subject_kind=m.get("subject_kind"),
+                        evidence_truthy=tuple(str(e) for e in evidence_truthy),
                     ),
                     action=str(r["action"]),
                     tier=LatencyTier(r["tier"]),

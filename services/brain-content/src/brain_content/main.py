@@ -17,6 +17,11 @@ from brain_content.dns_scanner import make_settings_factory as make_dns_settings
 from brain_content.runner import ContentRunner, make_settings_factory
 from brain_content.settings import Settings
 from brain_content.url_reputation import StaticBlocklist
+from business_registry.client import (
+    BusinessRegistryClient,
+    HttpBusinessRegistryClient,
+    NoopBusinessRegistryClient,
+)
 
 _log = get_logger("brain_content.main")
 
@@ -74,6 +79,14 @@ def create_app(
             model_cls=SignalEventV1,
         )
         await producer.start()
+        registry_client: BusinessRegistryClient
+        if settings.business_registry_url:
+            registry_client = HttpBusinessRegistryClient(
+                base_url=settings.business_registry_url
+            )
+        else:
+            registry_client = NoopBusinessRegistryClient()
+
         runner = ContentRunner(
             classifier=classifier_inst,
             signal_producer=producer,
@@ -82,6 +95,7 @@ def create_app(
                 schema_registry_url=settings.schema_registry_url,
                 group_id=settings.consumer_group,
             ),
+            business_registry=registry_client,
         )
         app.state.classifier = classifier_inst
         runner_task = asyncio.create_task(runner.start(), name="content-runner")

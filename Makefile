@@ -18,7 +18,7 @@ COMPOSE := docker compose -f docker-compose.dev.yml
 APP_SERVICES := ingest-momo ingest-voice ingest-sms \
                 stream-features stream-graph \
                 brain-behavioural brain-content brain-otp-guard \
-                url-intel \
+                url-intel business-registry \
                 decisions action-tier1 action-tier2 \
                 api-noc api-customer compliance
 

@@ -27,6 +27,10 @@ class Settings:
     url_intel_url: str = ""
     dns_scanner_timeout_s: float = 0.05
 
+    # Optional verified-business registry — when set, runner suppresses
+    # signals from verified short-code senders (banks, MNOs, OTPs).
+    business_registry_url: str = ""
+
     use_model_registry: bool = True
     model_registry_endpoint: str = "http://localhost:9000"
     model_registry_bucket: str = "fraudnet-models"
@@ -52,6 +56,7 @@ class Settings:
             bad_body_hashes=os.environ.get("BRAIN_CONTENT_BAD_BODY_HASHES", ""),
             url_intel_url=os.environ.get("URL_INTEL_URL", ""),
             dns_scanner_timeout_s=float(os.environ.get("BRAIN_CONTENT_DNS_TIMEOUT_S", "0.05")),
+            business_registry_url=os.environ.get("BUSINESS_REGISTRY_URL", ""),
             use_model_registry=os.environ.get("BRAIN_CONTENT_USE_REGISTRY", "1") == "1",
             model_registry_endpoint=os.environ.get(
                 "MODEL_REGISTRY_ENDPOINT", "http://localhost:9000"

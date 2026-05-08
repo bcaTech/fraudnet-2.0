@@ -1,7 +1,10 @@
 """Tier-2 NRT actuator adapters.
 
 Same shape as action-tier1, but timeouts are looser (2 s vs 100 ms) and the
-backend set is customer-facing rather than network-side.
+backend set is customer-facing rather than network-side. Customer-facing
+actuators resolve the subscriber's preferred locale and include both the
+locale code and the rendered message body in the payload — downstream
+notifier (SMS gateway / push hub) does not need an i18n catalogue.
 """
 
 from __future__ import annotations
@@ -12,8 +15,10 @@ from typing import Literal
 
 import httpx
 
+from fraudnet.i18n import DEFAULT_LOCALE, translate
 from fraudnet.obs import counter, get_logger
 from fraudnet.schemas.events import DecisionDispatchedV1
+from action_tier2.locale import StaticLocaleResolver, SubscriberLocaleResolver
 
 _log = get_logger("action_tier2.actuators")
 
@@ -66,12 +71,21 @@ class _HttpActuator(Actuator):
         actuator_id: str,
         timeout_s: float = 2.0,
         token: str | None = None,
+        locale_resolver: SubscriberLocaleResolver | None = None,
     ) -> None:
         self.action = action
         self.actuator_id = actuator_id
         self._url = url
         self._timeout = timeout_s
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+        self._locale_resolver = locale_resolver or StaticLocaleResolver()
+
+    async def _resolve_locale(self, msisdn: str) -> str:
+        try:
+            return await self._locale_resolver.resolve(msisdn)
+        except Exception as exc:  # noqa: BLE001 — locale lookup must not break notification
+            _log.warning("tier2.locale_lookup_failed", msisdn=msisdn, error=str(exc))
+            return DEFAULT_LOCALE
 
     async def _post(self, payload: dict[str, object]) -> ActuationResult:
         try:
@@ -98,8 +112,22 @@ class _HttpActuator(Actuator):
             )
 
 
+_ALERT_TEMPLATE_KEY: dict[str, str] = {
+    "customer.alert_smishing": "spam_sms_warning",
+    "customer.alert_spam_call": "spam_call_warning",
+    "customer.alert_otp_fraud": "otp_fraud_warning",
+    "customer.alert_url_blocked": "url_blocked",
+    "customer.alert_fraud": "fraud_alert",
+}
+
+
 class CustomerSmsAlertActuator(_HttpActuator):
-    """Customer-facing SMS / push alert."""
+    """Customer-facing SMS / push alert.
+
+    Looks up the subscriber's preferred locale and renders the alert body
+    using the i18n catalogue. The downstream notifier (SMS gateway / push)
+    receives `locale` + `body` and does not need an i18n catalogue.
+    """
 
     async def execute(self, decision: DecisionDispatchedV1) -> ActuationResult:
         if decision.subject.kind.value != "number":
@@ -108,12 +136,19 @@ class CustomerSmsAlertActuator(_HttpActuator):
                 actuator_id=self.actuator_id,
                 error="not a number subject",
             )
+        msisdn = decision.subject.id
+        locale = await self._resolve_locale(msisdn)
+        template_key = _ALERT_TEMPLATE_KEY.get(decision.action, "fraud_alert")
+        body = translate(template_key, locale=locale)
         return await self._post(
             {
-                "msisdn": decision.subject.id,
+                "msisdn": msisdn,
                 "alert_kind": decision.action,
                 "decision_id": decision.decision_id,
                 "severity": decision.severity.value,
+                "locale": locale,
+                "template_key": template_key,
+                "body": body,
             }
         )
 
@@ -128,11 +163,22 @@ class DoIKnowYouPromptActuator(_HttpActuator):
                 actuator_id=self.actuator_id,
                 error="not a number subject",
             )
+        msisdn = decision.subject.id
+        locale = await self._resolve_locale(msisdn)
+        recipient = str(decision.metadata.get("recipient") or msisdn)
         return await self._post(
             {
-                "msisdn": decision.subject.id,
+                "msisdn": msisdn,
                 "prompt": "do_i_know_you",
                 "decision_id": decision.decision_id,
+                "locale": locale,
+                "step1": translate("diky_step1", locale=locale, recipient=recipient),
+                "step2": translate(
+                    "diky_step2",
+                    locale=locale,
+                    amount=str(decision.metadata.get("amount") or "?"),
+                ),
+                "step3": translate("diky_step3", locale=locale),
             }
         )
 

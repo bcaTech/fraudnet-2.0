@@ -17,18 +17,39 @@ from action_tier2.actuators import (
     NoopActuator,
     SafeguardEnrollActuator,
 )
+from action_tier2.locale import StaticLocaleResolver, SubscriberLocaleResolver
 from action_tier2.runner import Tier2Runner, make_settings_factory
 from action_tier2.settings import Settings
 
 _log = get_logger("action_tier2.main")
 
 
-def _build_registry(settings: Settings) -> ActuatorRegistry:
+def _build_registry(
+    settings: Settings,
+    *,
+    locale_resolver: SubscriberLocaleResolver | None = None,
+) -> ActuatorRegistry:
     actuators: dict[str, Actuator] = {}
+    resolver = locale_resolver or StaticLocaleResolver(default=settings.default_locale)
 
-    def make(action: str, url: str, cls: type[Actuator], actuator_id: str) -> Actuator:
+    def make(
+        action: str,
+        url: str,
+        cls: type[Actuator],
+        actuator_id: str,
+        with_locale: bool = False,
+    ) -> Actuator:
         if not url:
             return NoopActuator(action=action)
+        if with_locale:
+            return cls(  # type: ignore[call-arg]
+                action=action,
+                url=url,
+                actuator_id=actuator_id,
+                token=settings.actuator_token or None,
+                timeout_s=settings.actuator_timeout_s,
+                locale_resolver=resolver,
+            )
         return cls(  # type: ignore[call-arg]
             action=action,
             url=url,
@@ -42,12 +63,42 @@ def _build_registry(settings: Settings) -> ActuatorRegistry:
         settings.customer_alert_url,
         CustomerSmsAlertActuator,
         "customer-notify",
+        with_locale=True,
+    )
+    actuators["customer.alert_spam_call"] = make(
+        "customer.alert_spam_call",
+        settings.customer_alert_url,
+        CustomerSmsAlertActuator,
+        "customer-notify",
+        with_locale=True,
+    )
+    actuators["customer.alert_otp_fraud"] = make(
+        "customer.alert_otp_fraud",
+        settings.customer_alert_url,
+        CustomerSmsAlertActuator,
+        "customer-notify",
+        with_locale=True,
+    )
+    actuators["customer.alert_url_blocked"] = make(
+        "customer.alert_url_blocked",
+        settings.customer_alert_url,
+        CustomerSmsAlertActuator,
+        "customer-notify",
+        with_locale=True,
+    )
+    actuators["customer.alert_fraud"] = make(
+        "customer.alert_fraud",
+        settings.customer_alert_url,
+        CustomerSmsAlertActuator,
+        "customer-notify",
+        with_locale=True,
     )
     actuators["customer.do_i_know_you_prompt"] = make(
         "customer.do_i_know_you_prompt",
         settings.do_i_know_you_url,
         DoIKnowYouPromptActuator,
         "customer-app-prompts",
+        with_locale=True,
     )
     actuators["momo.review_limit"] = make(
         "momo.review_limit",

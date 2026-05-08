@@ -1,0 +1,18 @@
+{
+  "_meta": "TODO: professional translation review required (Ga). Placeholder strings retain {variable} tokens.",
+  "spam_call_warning": "Kɔkɔɔ: Akɛ ni nɛɛ baanyɛ shwiɛɛmɔ asɛmpa hu (spam).",
+  "spam_sms_warning": "Kɔkɔɔ: SMS nɛɛ baanyɛ shwiɛɛmɔ asɛmpa hu (spam).",
+  "otp_fraud_warning": "Ona OTP kɛjɛɔ sika dwumadi mli yɛ akɛ mli. Eshi ji shwiɛɛmɔ. Kɛɛ kode lɛ mɔɔɔ.",
+  "url_blocked": "Wɔkɛ wɛbsaite nɛɛ ato fɔ̃ kɛhã o yibɔ̃.",
+  "fraud_alert": "Wɔna nibii ni nyɛ̃ɛ ko yɛ o akɔnta mli.",
+  "send_with_care_prompt": "Wɔkɛ shika nɛɛ baahĩa simma {duration}. Obaanyɛ folɔ amobaa.",
+  "return_to_sender_confirm": "Mã nɔ akɛ wɔbɔ GHS {amount} kɛyaha {recipient}.",
+  "diky_step1": "Wɔna nifeemɔ ko ni nyɛ̃ɛ tetee. Ole mɔ ni miiye lɛ, {recipient}?",
+  "diky_step2": "Yɛ́, mã nɔ: Bo o ha gbɛ kɛ shika {amount} GHS nɛɛ?",
+  "diky_step3": "Naagbee mãnɔ. Ngmã HƐƐ kɛjɛ shimɔɔ, loo DAABI kɛ folɔ.",
+  "ask_me_first_prompt": "Bo o ha gbɛ kɛ shika dwumadi GHS {amount} nɛɛ?",
+  "verified_business_badge": "Adwumawolɔ̃ ni atã wɔnɔ: {business_name}",
+  "passive_protection_enrolled": "Anɛnɛ o naa baato. Ngmã STOP kɛ ojɛ̃ mli.",
+  "transaction_held": "Wɔmiisɔ̃ɔ̃ o dwumadi nɛɛ mli kɛhã o yibɔ̃.",
+  "block_confirmed": "Wɔto naa nɛɛ fɔ̃: {msisdn}. Ngmã UNBLOCK kɛhã wɔŋmɛ tsɔɔ."
+}

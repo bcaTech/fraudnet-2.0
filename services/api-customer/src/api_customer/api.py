@@ -12,6 +12,11 @@ from pydantic import BaseModel
 import jwt
 
 from fraudnet.audit import record, with_purpose
+from fraudnet.i18n import (
+    parse_accept_language,
+    raw_template,
+    translate,
+)
 from fraudnet.kafka import AvroProducer
 from fraudnet.obs import counter, get_logger, metrics_endpoint
 from fraudnet.schemas.events import IntelEventV1
@@ -50,6 +55,19 @@ def _intel_producer(request: Request) -> AvroProducer[IntelEventV1]:
 
 def _db_pool(request: Request) -> asyncpg.Pool:
     return request.app.state.pool  # type: ignore[no-any-return]
+
+
+def _locale(
+    accept_language: Annotated[str | None, Header(alias="Accept-Language")] = None,
+) -> str:
+    """Resolve a supported locale from the request's Accept-Language header.
+
+    Falls back to English when the header is missing or names no
+    supported locale. Persisted subscriber preference (in the profile)
+    overrides this in the actuator path; this dep is for ad-hoc
+    customer-facing API responses.
+    """
+    return parse_accept_language(accept_language)
 
 
 async def _claims(
@@ -280,10 +298,43 @@ async def request_block(
     return {"status": "received"}
 
 
+@router.get("/i18n/messages")
+async def i18n_messages(locale: Annotated[str, Depends(_locale)]) -> dict[str, str]:
+    """Bulk-translate the public message-key set in the negotiated locale.
+
+    Used by the SMS template renderer + the customer self-service web UI
+    to fetch all strings in one round-trip. The returned map preserves
+    `{variable}` tokens unrendered — the caller substitutes at delivery
+    time.
+    """
+    keys = (
+        "spam_call_warning",
+        "spam_sms_warning",
+        "otp_fraud_warning",
+        "url_blocked",
+        "fraud_alert",
+        "send_with_care_prompt",
+        "return_to_sender_confirm",
+        "diky_step1",
+        "diky_step2",
+        "diky_step3",
+        "ask_me_first_prompt",
+        "verified_business_badge",
+        "passive_protection_enrolled",
+        "transaction_held",
+        "block_confirmed",
+    )
+    out: dict[str, str] = {"_locale": locale}
+    for k in keys:
+        out[k] = raw_template(k, locale=locale)
+    return out
+
+
 @router.get("/me/status")
 async def my_status(
     claims: Annotated[SessionClaims, Depends(_claims)],
     pool: Annotated[asyncpg.Pool, Depends(_db_pool)],
+    locale: Annotated[str, Depends(_locale)],
 ) -> dict[str, Any]:
     with with_purpose(Purpose.FRAUD_PREVENTION):
         async with pool.acquire() as conn:
@@ -299,9 +350,16 @@ async def my_status(
                 claims.tenant_id,
                 claims.msisdn,
             )
+    open_alerts = int(row["open_alerts"]) if row else 0
     return {
         "msisdn": claims.msisdn,
-        "open_alerts": int(row["open_alerts"]) if row else 0,
+        "open_alerts": open_alerts,
         "recent_alerts": int(row["recent_alerts"]) if row else 0,
         "max_severity": row["max_severity"] if row else None,
+        "locale": locale,
+        "banner": (
+            translate("fraud_alert", locale=locale)
+            if open_alerts > 0
+            else translate("passive_protection_enrolled", locale=locale)
+        ),
     }

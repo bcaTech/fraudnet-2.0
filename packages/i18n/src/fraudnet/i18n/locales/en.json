@@ -1,0 +1,17 @@
+{
+  "spam_call_warning": "Warning: This call may be spam.",
+  "spam_sms_warning": "Warning: This SMS may be spam.",
+  "otp_fraud_warning": "You are receiving a bank OTP while on a call. This may be a scam. Do not share the code with anyone.",
+  "url_blocked": "This website has been blocked for your protection.",
+  "fraud_alert": "Suspicious activity detected on your account.",
+  "send_with_care_prompt": "This transfer will be held for {duration}. You can cancel anytime.",
+  "return_to_sender_confirm": "Confirm reversal of GHS {amount} to {recipient}.",
+  "diky_step1": "We noticed an unusual transaction. Do you know the recipient {recipient}?",
+  "diky_step2": "Please confirm: was this transfer of GHS {amount} authorised by you?",
+  "diky_step3": "Final confirmation. Reply YES to send, NO to cancel.",
+  "ask_me_first_prompt": "Did you authorise this transaction of GHS {amount}?",
+  "verified_business_badge": "Verified business: {business_name}",
+  "passive_protection_enrolled": "Your line is protected against fraud. Reply STOP to opt out.",
+  "transaction_held": "Your transaction is being reviewed for security.",
+  "block_confirmed": "Number {msisdn} blocked. Reply UNBLOCK to reverse."
+}

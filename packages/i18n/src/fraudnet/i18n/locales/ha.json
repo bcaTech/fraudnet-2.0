@@ -1,0 +1,18 @@
+{
+  "_meta": "TODO: professional translation review required (Hausa). Placeholder strings retain {variable} tokens.",
+  "spam_call_warning": "Gargadi: Wannan kira na iya zama spam (saƙon banza).",
+  "spam_sms_warning": "Gargadi: Wannan SMS na iya zama spam (saƙon banza).",
+  "otp_fraud_warning": "Kana karɓar OTP daga banki yayin da kake kan kira. Wannan na iya zama zamba. Kar ka raba lambar da kowa.",
+  "url_blocked": "Mun toshe wannan rukunin yanar gizo don tsaron ka.",
+  "fraud_alert": "An gano wani aiki mai ban tsoro a kan asusun ka.",
+  "send_with_care_prompt": "Za mu rike wannan canja wuri na simma {duration}. Kana iya soke kowane lokaci.",
+  "return_to_sender_confirm": "Tabbatar: Mu mayar da GHS {amount} zuwa {recipient}.",
+  "diky_step1": "Mun ga aiki mai ban mamaki. Ka san mai karɓa, {recipient}?",
+  "diky_step2": "Don Allah tabbatar: Kai ka ba da izini ga canja wurin GHS {amount}?",
+  "diky_step3": "Tabbaci na ƙarshe. Aika I don a tura, ko A'A don a soke.",
+  "ask_me_first_prompt": "Kai ka ba da izini ga wannan ma'amalar ta GHS {amount}?",
+  "verified_business_badge": "An tantance kasuwanci: {business_name}",
+  "passive_protection_enrolled": "Layin ka yana ƙarƙashin tsaro. Aika STOP don ficewa.",
+  "transaction_held": "Muna duban ma'amalar ku don tsaro.",
+  "block_confirmed": "An toshe lambar {msisdn}. Aika UNBLOCK don a sake bude."
+}

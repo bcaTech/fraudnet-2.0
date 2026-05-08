@@ -24,6 +24,9 @@ class Settings:
 
     actuator_timeout_s: float = 2.0  # NRT — generous timeout
 
+    # Locale fallback for subscribers without a profile-stored preference.
+    default_locale: str = "en"
+
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8202
 
@@ -41,6 +44,7 @@ class Settings:
             safeguard_url=os.environ.get("SAFEGUARD_URL", ""),
             actuator_token=os.environ.get("ACTUATOR_TOKEN", ""),
             actuator_timeout_s=float(os.environ.get("ACTUATOR_TIMEOUT_S", "2.0")),
+            default_locale=os.environ.get("FRAUDNET_DEFAULT_LOCALE", "en"),
             host=os.environ.get("ACTION_TIER2_HOST", "0.0.0.0"),  # noqa: S104
             port=int(os.environ.get("ACTION_TIER2_PORT", "8202")),
         )

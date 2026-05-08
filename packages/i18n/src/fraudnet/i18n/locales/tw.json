@@ -1,0 +1,18 @@
+{
+  "_meta": "TODO: professional translation review required (Twi). Placeholder strings retain {variable} tokens.",
+  "spam_call_warning": "Kɔkɔbɔ: Saa frɛ yi bɛyɛ asɛmpa hunu (spam).",
+  "spam_sms_warning": "Kɔkɔbɔ: Saa nkrataa yi bɛyɛ asɛmpa hunu (spam).",
+  "otp_fraud_warning": "Worenya OTP afiri sika dwumadie wɔ frɛ yi mu. Ebia ɛyɛ nsɛnnahɔ. Mfa kode no nkyerɛ obiara.",
+  "url_blocked": "Yɛasi saa wɛbsaite yi ano de abɔ wo ho ban.",
+  "fraud_alert": "Yɛahu nneɛma a ɛnyɛ papa wɔ wo akontaabuo so.",
+  "send_with_care_prompt": "Yɛbɛkora saa sika yi so simma {duration}. Wobɛtumi atwa mu bere biara.",
+  "return_to_sender_confirm": "Si pi sɛ yɛbɛsan de GHS {amount} akɔma {recipient}.",
+  "diky_step1": "Yɛahunu adeyɛ bi a ɛnyɛ tete. Wonim onipa a ɔregye sika no, {recipient}?",
+  "diky_step2": "Mesrɛ wo si pi: Wo na woma kwan maa GHS {amount} sika yi anaa?",
+  "diky_step3": "Si pi a ɛtwa to. Twerɛ AANE na yɛnsoma, anaa DAABI na yɛntwa mu.",
+  "ask_me_first_prompt": "Wo na woma kwan maa GHS {amount} sika dwumadie yi anaa?",
+  "verified_business_badge": "Adwumayɛfoɔ a wɔahyɛ wɔn nsa: {business_name}",
+  "passive_protection_enrolled": "Wo nɔma wɔ banbɔ. Twerɛ STOP na woafiri mu.",
+  "transaction_held": "Yɛrehwɛ wo dwumadie yi mu de bɔ wo ho ban.",
+  "block_confirmed": "Yɛasi nɔma {msisdn} ano. Twerɛ UNBLOCK na yɛate."
+}

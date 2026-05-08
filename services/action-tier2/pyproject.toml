@@ -10,12 +10,14 @@ dependencies = [
   "fraudnet-schemas",
   "fraudnet-obs",
   "fraudnet-kafka",
+  "fraudnet-i18n",
 ]
 
 [tool.uv.sources]
 fraudnet-schemas = { workspace = true }
 fraudnet-obs = { workspace = true }
 fraudnet-kafka = { workspace = true }
+fraudnet-i18n = { workspace = true }
 
 [dependency-groups]
 dev = ["fraudnet-testing"]

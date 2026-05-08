@@ -11,7 +11,8 @@ Customer self-service API. MSISDN-OTP authentication; tenant-of-one (each custom
 | `GET`  | `/me/alerts` | session | Customer's alerts |
 | `POST` | `/me/report` | session | Submit fraud report → `intel.events.v1` |
 | `POST` | `/me/block` | session | Self-service block request → `intel.events.v1` |
-| `GET`  | `/me/status` | session | MSISDN summary (open + recent alerts) |
+| `GET`  | `/me/status` | session | MSISDN summary (open + recent alerts) — localised banner |
+| `GET`  | `/i18n/messages` | none | Bulk-dump of translated message templates for the negotiated locale |
 
 `POST /auth/request_otp` returns 202 regardless of whether the MSISDN is provisioned, to avoid disclosing membership.
 
@@ -23,6 +24,12 @@ Customer self-service API. MSISDN-OTP authentication; tenant-of-one (each custom
 4. Subsequent `/me/*` requests use `Authorization: Bearer <session_token>`.
 
 OTP backend swaps via env (DECISIONS.md D-005 — Phase 1 ships the stub; production cuts over to the security-team OTP service).
+
+## i18n
+
+All customer-facing surface respects `Accept-Language`. Supported locales: `en`, `tw`, `ga`, `ee`, `dag`, `ha`. Unknown / unsupported tags fall back to English. The localised string set lives in `packages/i18n/src/fraudnet/i18n/locales/<locale>.json`.
+
+`GET /i18n/messages` returns the full template set for a single round-trip on the customer self-service web UI. `{variable}` tokens are returned unrendered — caller substitutes at delivery time.
 
 ## Reports + blocks
 

@@ -101,3 +101,56 @@ async def test_do_i_know_you_rejects_non_number() -> None:
     )
     r = await a.execute(_decision("customer.do_i_know_you_prompt", EntityKind.WALLET, "W:1"))
     assert r.outcome == "failed"
+
+
+import json
+
+from action_tier2.locale import MappingLocaleResolver
+
+
+async def test_customer_alert_localises_payload() -> None:
+    captured: dict[str, object] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = req.content
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(_handler)
+    with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+        resolver = MappingLocaleResolver(mapping={"+233241234567": "tw"})
+        a = CustomerSmsAlertActuator(
+            action="customer.alert_smishing",
+            url="http://notify.example/alert",
+            actuator_id="notify",
+            locale_resolver=resolver,
+        )
+        r = await a.execute(
+            _decision("customer.alert_smishing", EntityKind.NUMBER, "+233241234567")
+        )
+        assert r.outcome == "executed"
+        body = json.loads(captured["body"])
+        assert body["locale"] == "tw"
+        assert body["template_key"] == "spam_sms_warning"
+        assert body["body"]
+        assert body["body"] != ""
+
+
+async def test_customer_alert_falls_back_to_english_for_unmapped_msisdn() -> None:
+    captured: dict[str, object] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = req.content
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(_handler)
+    with patch("httpx.AsyncClient", lambda *a, **k: httpx.AsyncClient(transport=transport, **k)):
+        resolver = MappingLocaleResolver(mapping={"+233241111111": "ha"}, default="en")
+        a = CustomerSmsAlertActuator(
+            action="customer.alert_smishing",
+            url="http://notify.example/alert",
+            actuator_id="notify",
+            locale_resolver=resolver,
+        )
+        await a.execute(_decision("customer.alert_smishing", EntityKind.NUMBER, "+233242222222"))
+        body = json.loads(captured["body"])
+        assert body["locale"] == "en"

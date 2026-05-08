@@ -1,0 +1,18 @@
+{
+  "_meta": "TODO: professional translation review required (Dagbani). Placeholder strings retain {variable} tokens.",
+  "spam_call_warning": "Wuhibu: Bole ŋɔ ni tooi nyɛ yɛlimaŋli (spam).",
+  "spam_sms_warning": "Wuhibu: SMS ŋɔ ni tooi nyɛ yɛlimaŋli (spam).",
+  "otp_fraud_warning": "A nyari OTP banki sani saha shɛli a ni be bole ni. Di ni tooi nyɛ namfɔŋ. Miri ka a yɛli sokam shɛm la.",
+  "url_blocked": "Ti zaŋ wɛbsaiti ŋɔ kpa zuɣu a tibili zuɣu.",
+  "fraud_alert": "Ti nya bidipuli shɛŋa di bi viɛla a akɔnta zuɣu.",
+  "send_with_care_prompt": "Ti ni gbibi ligri ŋɔ simma {duration}. A ni tooi tahi li saha kam.",
+  "return_to_sender_confirm": "Tahimi yɛla: Ti labisi GHS {amount} n-ti {recipient}.",
+  "diky_step1": "Ti nya tuumi shɛli di bi viɛla. A mi {recipient} ŋun deeri ligri ŋɔ?",
+  "diky_step2": "Tahimi yɛla: A nuu mi n-ti soli ka GHS {amount} ligri ŋɔ chaŋ?",
+  "diky_step3": "Bahi yɛla. Sabi YENI ka ti zaŋ chaŋ, bee AAYI ka ti che.",
+  "ask_me_first_prompt": "A nuu mi n-ti soli ka GHS {amount} ligri tuumi ŋɔ chaŋ?",
+  "verified_business_badge": "Tuma kpariba shɛba bɛ ni tahi: {business_name}",
+  "passive_protection_enrolled": "A foon zuɣu mali tibili. Sabi STOP ka yi puuni.",
+  "transaction_held": "Ti yiɣisira a tuumi ŋɔ a tibili zuɣu.",
+  "block_confirmed": "Ti zaŋ noli {msisdn} kpa. Sabi UNBLOCK ka ti yooi li."
+}

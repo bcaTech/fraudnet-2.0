@@ -1,0 +1,18 @@
+{
+  "_meta": "TODO: professional translation review required (Ewe). Placeholder strings retain {variable} tokens.",
+  "spam_call_warning": "Nuxlɔ̃ame: Ka sia ate ŋu anye nya manyatalenu (spam).",
+  "spam_sms_warning": "Nuxlɔ̃ame: SMS sia ate ŋu anye nya manyatalenu (spam).",
+  "otp_fraud_warning": "Èle OTP xɔm tso ga gbɔ esi nèle ka me. Ate ŋu anye amebamame. Mègagblɔ kodea na ame aɖeke o.",
+  "url_blocked": "Míetu wɛbsaiti sia ɖe wò dedienɔnɔ ta.",
+  "fraud_alert": "Míekpɔ nuwɔna manyatalenuwo le wò akɔnta dzi.",
+  "send_with_care_prompt": "Míalé ga sia ɖe asi simma {duration}. Àte ŋu axe ɣekaɣi ko.",
+  "return_to_sender_confirm": "Da asi ɖe edzi: Míatrɔ GHS {amount} ɖe {recipient} ŋu.",
+  "diky_step1": "Míekpɔ nuwɔna deyiɖeka. Ènya {recipient} si le ga la xɔm la?",
+  "diky_step2": "Da asi ɖe edzi: Wò ŋutɔe ɖe mɔ na ga {amount} GHS sia ɖoɖoa?",
+  "diky_step3": "Mlɔeɖoɖo. Ŋlɔ ƐƐ ne nèdi ɖoɖoa, alo AO be miatso.",
+  "ask_me_first_prompt": "Wò ŋutɔe ɖe mɔ na ga GHS {amount} sia dɔdɔa?",
+  "verified_business_badge": "Dɔwɔƒe si me wokpɔ asi le: {business_name}",
+  "passive_protection_enrolled": "Wò ka le dedienɔnɔ me. Ŋlɔ STOP be nàdo le eme.",
+  "transaction_held": "Míele wò ga ɖoɖo la kpɔm ɖe wò dedienɔnɔ ta.",
+  "block_confirmed": "Míetu fonu {msisdn}. Ŋlɔ UNBLOCK be miagbugbɔe aʋu."
+}

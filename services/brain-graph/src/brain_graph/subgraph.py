@@ -11,8 +11,21 @@ from dataclasses import dataclass, field
 from typing import Iterable, Literal
 
 
-NodeKind = Literal["Number", "Wallet", "Device", "Account", "Ring"]
-EdgeKind = Literal["CALLED", "SMSED", "SENT", "OWNS", "USED", "CASHED_OUT_TO", "MEMBER_OF"]
+NodeKind = Literal[
+    "Number", "Wallet", "Device", "Account", "Ring", "Domain", "IPEndpoint"
+]
+EdgeKind = Literal[
+    "CALLED",
+    "SMSED",
+    "SENT",
+    "OWNS",
+    "USED",
+    "CASHED_OUT_TO",
+    "MEMBER_OF",
+    "QUERIED",
+    "CONNECTED",
+    "RESOLVED_TO",
+]
 
 
 @dataclass(frozen=True)
@@ -124,6 +137,8 @@ _NODE_KEY_BY_KIND: dict[NodeKind, str] = {
     "Device": "imei",
     "Account": "account_hash",
     "Ring": "ring_id",
+    "Domain": "fqdn",
+    "IPEndpoint": "ip",
 }
 
 

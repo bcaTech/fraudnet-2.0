@@ -28,9 +28,12 @@ from brain_graph.community import Community, detect_communities
 from brain_graph.motifs import (
     MotifMatch,
     detect_bust_outs,
+    detect_device_sim_wallet_fusion,
     detect_mule_chains,
     detect_sim_carousels,
+    detect_sms_url_blocklist,
     detect_voice_sms_momo_24h,
+    detect_voice_then_momo_30m,
 )
 from brain_graph.rings import RingCandidate, identify_rings
 from brain_graph.subgraph import Subgraph, extract_window
@@ -62,6 +65,7 @@ _NODE_KIND_TO_ENTITY_KIND: dict[str, EntityKind] = {
     "Wallet": EntityKind.WALLET,
     "Device": EntityKind.DEVICE,
     "Account": EntityKind.ACCOUNT,
+    "Domain": EntityKind.URL,  # Subject for OTT motifs
 }
 
 
@@ -84,12 +88,24 @@ class Analyzer:
         tenant_id: str = "mtn-ghana",
         window_hours: int = 24,
         max_nodes: int = 5000,
+        flagged_domains: frozenset[str] | None = None,
     ) -> None:
         self._graph = graph_client
         self._producer = motif_producer
         self._tenant_id = tenant_id
         self._window_hours = window_hours
         self._max_nodes = max_nodes
+        # Domains that brain-content / url-intel have flagged. Hot-loaded
+        # by reference; the runtime can swap the set without rebuilding the
+        # analyser. Empty disables sms_url_blocklist detection.
+        self._flagged_domains = flagged_domains or frozenset()
+
+    @property
+    def flagged_domains(self) -> frozenset[str]:
+        return self._flagged_domains
+
+    def update_flagged_domains(self, domains: frozenset[str]) -> None:
+        self._flagged_domains = domains
 
     async def run_once(self) -> AnalysisResult:
         scope = GraphScope(tenant_id=self._tenant_id)
@@ -139,6 +155,10 @@ class Analyzer:
         out.extend(detect_mule_chains(sg))
         out.extend(detect_sim_carousels(sg))
         out.extend(detect_bust_outs(sg))
+        # Phase 3 cross-domain motifs.
+        out.extend(detect_voice_then_momo_30m(sg))
+        out.extend(detect_sms_url_blocklist(sg, flagged_domains=self._flagged_domains))
+        out.extend(detect_device_sim_wallet_fusion(sg))
         return out
 
     async def _publish_motifs(self, motifs: list[MotifMatch]) -> None:

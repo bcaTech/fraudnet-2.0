@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from brain_graph.motifs import (
     detect_bust_outs,
+    detect_device_sim_wallet_fusion,
     detect_mule_chains,
     detect_sim_carousels,
+    detect_sms_url_blocklist,
     detect_voice_sms_momo_24h,
+    detect_voice_then_momo_30m,
 )
 from brain_graph.subgraph import GraphEdge, GraphNode, Subgraph
 
@@ -79,6 +82,20 @@ def _add_used(sg: Subgraph, msisdn: str, imei: str) -> None:
     )
 
 
+def _add_queried(sg: Subgraph, msisdn: str, domain: str, ts_ms: int) -> None:
+    sg.edges.append(
+        GraphEdge(
+            kind="QUERIED",
+            src_kind="Number",
+            src_id=msisdn,
+            dst_kind="Domain",
+            dst_id=domain,
+            ts_ms=ts_ms,
+            properties={"kind": "dns_query"},
+        )
+    )
+
+
 class TestVoiceSmsMomo24h:
     def test_matches_chain(self) -> None:
         sg = _sg()
@@ -136,6 +153,139 @@ class TestSimCarousel:
         for n in ("A", "B"):
             _add_used(sg, n, "IMEI1")
         assert detect_sim_carousels(sg, min_numbers_per_device=3) == []
+
+
+class TestVoiceThenMomo30m:
+    def test_caller_pays_callee_within_30_min(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_call(sg, "A", "B", t0, dur=120)
+        _add_owns(sg, "A", "WA")
+        _add_owns(sg, "B", "WB")
+        _add_send(sg, "WA", "WB", t0 + 10 * 60_000, amount=50_000)  # 10 min later
+
+        matches = detect_voice_then_momo_30m(sg)
+        assert len(matches) == 1
+        m = matches[0]
+        assert m.motif == "voice_then_momo_30m"
+        assert ("Number", "A") in m.members
+        assert ("Wallet", "WA") in m.members
+        assert ("Wallet", "WB") in m.members
+        assert m.evidence["lag_call_to_send_s"] == 600
+
+    def test_no_match_outside_window(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_call(sg, "A", "B", t0)
+        _add_owns(sg, "A", "WA")
+        _add_owns(sg, "B", "WB")
+        # 45 min later — outside 30 min window
+        _add_send(sg, "WA", "WB", t0 + 45 * 60_000)
+        assert detect_voice_then_momo_30m(sg) == []
+
+    def test_no_match_when_send_predates_call(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_call(sg, "A", "B", t0 + 10 * 60_000)
+        _add_owns(sg, "A", "WA")
+        _add_owns(sg, "B", "WB")
+        _add_send(sg, "WA", "WB", t0)  # before the call
+        assert detect_voice_then_momo_30m(sg) == []
+
+    def test_no_match_send_to_third_party_wallet(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_call(sg, "A", "B", t0)
+        _add_owns(sg, "A", "WA")
+        _add_owns(sg, "B", "WB")
+        _add_send(sg, "WA", "WX", t0 + 5 * 60_000)  # to unrelated wallet
+        assert detect_voice_then_momo_30m(sg) == []
+
+
+class TestSmsUrlBlocklist:
+    def test_recipient_queries_flagged_domain_after_sms(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_sms(sg, "A", "B", t0)
+        _add_queried(sg, "B", "phish.example.com", t0 + 5 * 60_000)  # 5 min later
+
+        matches = detect_sms_url_blocklist(
+            sg, flagged_domains=frozenset({"phish.example.com"})
+        )
+        assert len(matches) == 1
+        m = matches[0]
+        assert m.motif == "sms_url_blocklist"
+        assert ("Number", "A") in m.members
+        assert ("Number", "B") in m.members
+        assert ("Domain", "phish.example.com") in m.members
+
+    def test_empty_blocklist_disables_motif(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_sms(sg, "A", "B", t0)
+        _add_queried(sg, "B", "phish.example.com", t0 + 5 * 60_000)
+        assert detect_sms_url_blocklist(sg, flagged_domains=frozenset()) == []
+
+    def test_query_outside_window_no_match(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_sms(sg, "A", "B", t0)
+        # 2 hours later — outside the 1h window
+        _add_queried(sg, "B", "phish.example.com", t0 + 2 * 60 * 60_000)
+        matches = detect_sms_url_blocklist(
+            sg, flagged_domains=frozenset({"phish.example.com"})
+        )
+        assert matches == []
+
+    def test_query_predating_sms_no_match(self) -> None:
+        sg = _sg()
+        t0 = 1_700_000_000_000
+        _add_queried(sg, "B", "phish.example.com", t0)
+        _add_sms(sg, "A", "B", t0 + 5 * 60_000)
+        matches = detect_sms_url_blocklist(
+            sg, flagged_domains=frozenset({"phish.example.com"})
+        )
+        assert matches == []
+
+
+class TestDeviceSimWalletFusion:
+    def test_two_numbers_one_with_active_wallet_fires(self) -> None:
+        sg = _sg()
+        for n in ("A", "B"):
+            _add_used(sg, n, "IMEI1")
+        _add_owns(sg, "A", "WA")
+        _add_send(sg, "WA", "WX", 1_700_000_000_000)
+
+        matches = detect_device_sim_wallet_fusion(sg, min_numbers_per_device=2)
+        assert len(matches) == 1
+        m = matches[0]
+        assert m.motif == "device_sim_wallet_fusion"
+        assert ("Device", "IMEI1") in m.members
+        assert ("Wallet", "WA") in m.members
+
+    def test_no_active_wallet_does_not_fire_when_required(self) -> None:
+        sg = _sg()
+        for n in ("A", "B"):
+            _add_used(sg, n, "IMEI1")
+        _add_owns(sg, "A", "WA")  # owns wallet but never SENT
+        assert detect_device_sim_wallet_fusion(sg, min_numbers_per_device=2) == []
+
+    def test_can_relax_active_wallet_requirement(self) -> None:
+        sg = _sg()
+        for n in ("A", "B"):
+            _add_used(sg, n, "IMEI1")
+        _add_owns(sg, "A", "WA")
+        matches = detect_device_sim_wallet_fusion(
+            sg, min_numbers_per_device=2, require_active_wallet=False
+        )
+        assert len(matches) == 1
+
+    def test_solo_user_does_not_fire(self) -> None:
+        sg = _sg()
+        _add_used(sg, "A", "IMEI1")
+        _add_owns(sg, "A", "WA")
+        _add_send(sg, "WA", "WX", 1_700_000_000_000)
+        assert detect_device_sim_wallet_fusion(sg, min_numbers_per_device=2) == []
 
 
 class TestBustOut:

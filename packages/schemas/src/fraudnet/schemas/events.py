@@ -248,6 +248,12 @@ class MotifDetectedV1(_EventBase):
         "fan_out_collapse",
         "smishing_burst",
         "wangiri_loop",
+        # Phase 3 cross-domain motifs (brain-graph §3.6)
+        "voice_then_momo_30m",
+        "sms_url_blocklist",
+        "device_sim_wallet_fusion",
+        "sim_carousel",
+        "bust_out",
     ]
     members: list[Subject]
     confidence: float = Field(ge=0.0, le=1.0)

@@ -13,6 +13,7 @@ COPY packages/kafka-client/pyproject.toml packages/kafka-client/pyproject.toml
 COPY packages/audit-lib/pyproject.toml packages/audit-lib/pyproject.toml
 COPY packages/auth-lib/pyproject.toml packages/auth-lib/pyproject.toml
 COPY packages/graph-client/pyproject.toml packages/graph-client/pyproject.toml
+COPY packages/federation/pyproject.toml packages/federation/pyproject.toml
 COPY services/api-enterprise/pyproject.toml services/api-enterprise/pyproject.toml
 COPY packages/schemas packages/schemas
 COPY packages/obs packages/obs
@@ -20,6 +21,7 @@ COPY packages/kafka-client packages/kafka-client
 COPY packages/audit-lib packages/audit-lib
 COPY packages/auth-lib packages/auth-lib
 COPY packages/graph-client packages/graph-client
+COPY packages/federation packages/federation
 COPY services/api-enterprise services/api-enterprise
 RUN uv sync --frozen --package api-enterprise --no-dev
 

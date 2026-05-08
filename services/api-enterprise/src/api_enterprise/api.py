@@ -21,13 +21,14 @@ from time import time
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from fraudnet.audit import record, with_purpose
 from fraudnet.auth.principal import Principal, Role
 from fraudnet.auth.rbac import require_role, require_step_up
+from fraudnet.federation import FederationClient, hash_identifier
 from fraudnet.graph import GraphClient, GraphScope
 from fraudnet.kafka import AvroProducer
 from fraudnet.obs import counter, get_logger, metrics_endpoint
@@ -93,9 +94,8 @@ def _graph(request: Request) -> GraphClient:
     return request.app.state.graph  # type: ignore[no-any-return]
 
 
-def _federation(request: Request) -> object | None:
-    """Federation client. Phase 4 wires this in alongside the federation
-    package; the route is federation-aware but does not require it."""
+def _federation(request: Request) -> FederationClient | None:
+    """Federation client. None when no peers are configured for this opco."""
     return getattr(request.app.state, "federation", None)
 
 
@@ -391,7 +391,7 @@ async def tenant_block_request(
     body: BlockRequestBody,
     block_repo: Annotated[BlockRequestRepo, Depends(_block_repo)],
     shared_repo: Annotated[SharedFlagRepo, Depends(_shared_repo)],
-    federation: Annotated[object | None, Depends(_federation)],
+    federation: Annotated[FederationClient | None, Depends(_federation)],
     principal: Annotated[Principal, Depends(_principal)],
 ) -> BlockRequestOut:
     if body.target_kind not in {"msisdn", "wallet", "url", "imei"}:
@@ -419,7 +419,7 @@ async def tenant_block_request(
         # review queue, while peer opcos get a hashed flag they can match
         # against their own subscriber base without seeing the plaintext.
         for peer in body.share_with:
-            ident_hash = _hash_identifier(target, kind=body.target_kind)
+            ident_hash = hash_identifier(target, kind=body.target_kind)
             await shared_repo.submit(
                 sender_tenant=principal.tenant_id,
                 recipient_tenant=peer,
@@ -429,14 +429,25 @@ async def tenant_block_request(
                 confidence=0.85,
                 evidence={"reason": body.reason[:512]},
             )
-            if federation is not None and hasattr(federation, "publish_flag"):
-                await federation.publish_flag(  # type: ignore[attr-defined]
-                    peer=peer,
-                    identifier_hash=ident_hash,
-                    identifier_kind=body.target_kind,
-                    indicator_kind="block_request",
-                    confidence=0.85,
-                )
+            if federation is not None and peer in federation.peers:
+                try:
+                    await federation.publish_flag(
+                        peer=peer,
+                        identifier_hash=ident_hash,
+                        identifier_kind=body.target_kind,
+                        indicator_kind="block_request",
+                        confidence=0.85,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # Federation push is best-effort; the local block request
+                    # has already been recorded so the NOC will pick it up
+                    # regardless. We log + continue so a peer outage does
+                    # not break the local user flow.
+                    _log.warning(
+                        "enterprise.federation.publish_failed",
+                        peer=peer,
+                        error=str(exc),
+                    )
 
         await record(
             action="enterprise.block_request",
@@ -610,18 +621,6 @@ def _valid_slug(slug: str) -> bool:
     return bool(_SLUG_RE.match(slug))
 
 
-def _hash_identifier(value: str, *, kind: str) -> str:
-    """Salted SHA-256 hash for cross-opco sharing.
-
-    Replaced by `fraudnet.federation.hash_identifier()` once that package
-    lands; the local fallback keeps this service self-contained until then
-    so the wire format stays stable across the migration.
-    """
-    salt = "fraudnet-federation-v1"
-    payload = f"{salt}|{kind}|{value}".encode()
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _principal_to_uuid(principal: Principal) -> UUID:
     """Map a Keycloak `sub` to a UUID. UUID subs pass through; non-UUID subs
     are hashed deterministically (matches api-noc's convention)."""
@@ -634,8 +633,3 @@ def _principal_to_uuid(principal: Principal) -> UUID:
 
 # Re-export for tests
 __all__ = ["router"]
-
-
-# Suppress unused — Header import kept for forward-compat (admin tooling
-# expects custom headers in some flows).
-_ = Header

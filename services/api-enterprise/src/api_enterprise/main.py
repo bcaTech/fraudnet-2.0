@@ -10,6 +10,8 @@ from redis.asyncio import Redis  # type: ignore[import-untyped]
 
 from fraudnet.auth.principal import Principal
 from fraudnet.auth.token import TokenValidator, TokenValidatorConfig, extract_principal
+from fraudnet.federation import FederationClient
+from fraudnet.federation.client import parse_peers
 from fraudnet.graph import GraphClient
 from fraudnet.kafka import AvroProducer, KafkaSettings
 from fraudnet.obs import (
@@ -50,7 +52,7 @@ def create_app(
     graph: GraphClient | None = None,
     rate_limiter: RateLimiter | None = None,
     intel_producer: object | None = None,
-    federation: object | None = None,
+    federation: FederationClient | None = None,
     token_validator: TokenValidator | None = None,
     test_principal: Principal | None = None,
 ) -> FastAPI:
@@ -66,7 +68,7 @@ def create_app(
         configure_logging(service=settings.service_name, level=settings.log_level)
         configure_tracing(service=settings.service_name)
 
-        nonlocal db, graph, rate_limiter, intel_producer, token_validator
+        nonlocal db, graph, rate_limiter, intel_producer, token_validator, federation
         if db is None:
             db = Database(settings.postgres_dsn)
             await db.connect()
@@ -119,6 +121,17 @@ def create_app(
                     jwks_url=settings.jwks_url,
                 )
             )
+        if federation is None and settings.federation_peers:
+            peers = parse_peers(
+                settings.federation_peers,
+                shared_secret=settings.federation_shared_secret,
+            )
+            if peers:
+                federation = FederationClient(peers)
+                _log.info(
+                    "api_enterprise.federation.enabled",
+                    peers=",".join(peers),
+                )
 
         app.state.db = db
         app.state.alerts = EnterpriseAlertRepo(db)
@@ -138,6 +151,8 @@ def create_app(
             _log.info("api_enterprise.stopping")
             if intel_producer is not None and hasattr(intel_producer, "stop"):
                 await intel_producer.stop()  # type: ignore[func-returns-value]
+            if federation is not None:
+                await federation.close()
             if graph is not None:
                 await graph.close()
             if db is not None:

@@ -17,7 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fraudnet.auth.principal import Principal, Role
-from api_enterprise.api import _hash_identifier, _valid_slug
+from fraudnet.federation import hash_identifier
+from api_enterprise.api import _valid_slug
 from api_enterprise.main import create_app
 from api_enterprise.rate_limit import InMemoryRateLimiter, RateLimitConfig
 
@@ -310,9 +311,9 @@ def test_slug_validator(slug: str, ok: bool) -> None:
 def test_hash_identifier_is_deterministic_and_kind_sensitive() -> None:
     """Same value, different kind → different hash. PII never crosses; tests
     catch any change to the wire format."""
-    h_msisdn = _hash_identifier("+233200000001", kind="msisdn")
-    h_wallet = _hash_identifier("+233200000001", kind="wallet")
-    h_msisdn_dup = _hash_identifier("+233200000001", kind="msisdn")
+    h_msisdn = hash_identifier("+233200000001", kind="msisdn")
+    h_wallet = hash_identifier("+233200000001", kind="wallet")
+    h_msisdn_dup = hash_identifier("+233200000001", kind="msisdn")
     assert h_msisdn == h_msisdn_dup
     assert h_msisdn != h_wallet
     assert len(h_msisdn) == 64  # sha-256 hex

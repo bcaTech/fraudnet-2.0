@@ -1,0 +1,22 @@
+[project]
+name = "fraudnet-kafka"
+version = "0.1.0"
+description = "Schema-registry-backed Avro producer/consumer wrappers with DLQ wiring"
+requires-python = ">=3.12"
+dependencies = [
+  "confluent-kafka[avro,schema-registry]>=2.6",
+  "fastavro>=1.9",
+  "fraudnet-schemas",
+  "fraudnet-obs",
+]
+
+[tool.uv.sources]
+fraudnet-schemas = { workspace = true }
+fraudnet-obs = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fraudnet"]

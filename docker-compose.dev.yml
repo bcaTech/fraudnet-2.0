@@ -559,6 +559,30 @@ services:
       retries: 5
       start_period: 30s
 
+  brain-graph:
+    <<: *app-defaults
+    container_name: fraudnet-brain-graph
+    ports: ["8302:8302"]
+    environment:
+      <<: *app-env
+      BRAIN_GRAPH_HOST: 0.0.0.0
+      BRAIN_GRAPH_PORT: "8302"
+      BRAIN_GRAPH_BATCH_INTERVAL_S: "900"
+    command: >
+      uv run --package brain-graph uvicorn brain_graph.main:app
+      --host 0.0.0.0 --port 8302 --reload --reload-dir /workspace/services/brain-graph
+      --reload-dir /workspace/packages
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      schema-registry: { condition: service_healthy }
+      memgraph: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8302/health/live', timeout=2).status==200 else 1)\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   # ---- Decisions and actuators (Layer 4) ------------------------------------
 
   decisions:

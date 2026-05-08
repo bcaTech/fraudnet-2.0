@@ -123,6 +123,29 @@ class AlertSummary(BaseModel):
     created_at: Any
 
 
+class OttAlertSummary(BaseModel):
+    id: str
+    severity: str
+    score: float
+    status: str
+    domain: str | None
+    signal_kind: str | None  # e.g. data.dns_blocklist_hit, data.ott_suspicious_domain
+    created_at: Any
+
+
+class BlockedDomain(BaseModel):
+    domain: str
+    category: str | None
+    first_blocked_at: Any
+    last_blocked_at: Any
+    block_count: int
+
+
+class ReportUrlBody(BaseModel):
+    url: str
+    notes: str | None = None
+
+
 # --------------------------------------------------------------------------
 # Health / metrics
 # --------------------------------------------------------------------------
@@ -296,6 +319,166 @@ async def request_block(
             tenant_id=claims.tenant_id,
         )
     return {"status": "received"}
+
+
+@router.get("/me/ott-alerts", response_model=list[OttAlertSummary])
+async def list_my_ott_alerts(
+    claims: Annotated[SessionClaims, Depends(_claims)],
+    pool: Annotated[asyncpg.Pool, Depends(_db_pool)],
+) -> list[OttAlertSummary]:
+    """OTT-specific fraud alerts (phishing URLs, suspicious domains, OTT lookalikes).
+
+    Includes both:
+      - alerts whose subject is the customer's number with type='ott'
+        (e.g. customer's traffic landed on a flagged domain), and
+      - URL-subject alerts where the customer's MSISDN appears in the
+        evidence (the alert is *about* the URL, but the customer was
+        the affected party).
+    """
+    with with_purpose(Purpose.FRAUD_PREVENTION):
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, severity, score, status, details, created_at
+                  FROM alerts
+                 WHERE tenant_id = $1
+                   AND type = 'ott'
+                   AND (
+                       (subject_kind = 'number' AND subject_id = $2)
+                    OR (details ->> 'msisdn' = $2)
+                   )
+                 ORDER BY created_at DESC
+                 LIMIT 50
+                """,
+                claims.tenant_id,
+                claims.msisdn,
+            )
+        await record(
+            action="customer.ott_alerts.read",
+            resource_kind="msisdn",
+            resource_id=claims.msisdn,
+            actor_kind="user",
+            tenant_id=claims.tenant_id,
+        )
+    return [
+        OttAlertSummary(
+            id=str(r["id"]),
+            severity=r["severity"],
+            score=float(r["score"]),
+            status=r["status"],
+            domain=(r["details"] or {}).get("domain"),
+            signal_kind=(r["details"] or {}).get("signal_kind"),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@router.post("/me/report-url")
+async def report_url(
+    body: ReportUrlBody,
+    claims: Annotated[SessionClaims, Depends(_claims)],
+    intel: Annotated[AvroProducer[IntelEventV1], Depends(_intel_producer)],
+) -> dict[str, str]:
+    """Customer reports a suspicious URL.
+
+    The URL is forwarded to the intel pipeline as an `indicator_kind='url'`
+    customer report. brain-content's URL-intel pipeline ingests it; if the
+    domain matches existing flagged signals or hits the OTT analyser, it
+    is escalated for review.
+    """
+    raw = (body.url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="url is required")
+    # Length guard before any DB write — the indicator field has its own
+    # bounds, but we cap at 2k here so the audit log stays readable.
+    if len(raw) > 2_048:
+        raise HTTPException(status_code=400, detail="url too long")
+
+    now_ms = int(time() * 1000)
+    event = IntelEventV1(
+        event_id=f"int_{uuid4().hex[:24]}",
+        event_ts_ms=now_ms,
+        ingest_ts_ms=now_ms,
+        source="api-customer:report-url",
+        tenant_id=claims.tenant_id,
+        kind="customer_report",
+        indicator_kind=EntityKind.URL,
+        indicator=raw,
+        confidence=0.6,  # customer reports of URLs are valuable but not authoritative
+        attribution=f"customer:{claims.msisdn}",
+        notes=body.notes,
+    )
+    await intel.send(event, key=raw)
+    _REPORTS.labels(kind="url").inc()
+
+    with with_purpose(Purpose.FRAUD_PREVENTION):
+        await record(
+            action="customer.report_url",
+            resource_kind="url",
+            resource_id=raw[:128],
+            actor_kind="user",
+            tenant_id=claims.tenant_id,
+            metadata={"has_notes": str(body.notes is not None).lower()},
+        )
+    return {"status": "received", "event_id": event.event_id}
+
+
+@router.get("/me/blocked-domains", response_model=list[BlockedDomain])
+async def list_my_blocked_domains(
+    claims: Annotated[SessionClaims, Depends(_claims)],
+    pool: Annotated[asyncpg.Pool, Depends(_db_pool)],
+) -> list[BlockedDomain]:
+    """Domains that were blocked / flagged on the customer's behalf.
+
+    Aggregates over the customer's OTT alerts (the per-event details).
+    Returns one row per distinct domain with first/last block timestamps
+    and a count. Customers see the domains that were sinkholed for them
+    so they understand what their fraud protection has done.
+    """
+    with with_purpose(Purpose.FRAUD_PREVENTION):
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    details ->> 'domain'   AS domain,
+                    details ->> 'category' AS category,
+                    min(created_at)        AS first_blocked_at,
+                    max(created_at)        AS last_blocked_at,
+                    count(*)               AS block_count
+                  FROM alerts
+                 WHERE tenant_id = $1
+                   AND type = 'ott'
+                   AND details ? 'domain'
+                   AND (
+                       (subject_kind = 'number' AND subject_id = $2)
+                    OR (details ->> 'msisdn' = $2)
+                   )
+                 GROUP BY details ->> 'domain', details ->> 'category'
+                 ORDER BY max(created_at) DESC
+                 LIMIT 100
+                """,
+                claims.tenant_id,
+                claims.msisdn,
+            )
+        await record(
+            action="customer.blocked_domains.read",
+            resource_kind="msisdn",
+            resource_id=claims.msisdn,
+            actor_kind="user",
+            tenant_id=claims.tenant_id,
+        )
+    return [
+        BlockedDomain(
+            domain=r["domain"] or "",
+            category=r["category"],
+            first_blocked_at=r["first_blocked_at"],
+            last_blocked_at=r["last_blocked_at"],
+            block_count=int(r["block_count"]),
+        )
+        for r in rows
+        if r["domain"]
+    ]
 
 
 @router.get("/i18n/messages")

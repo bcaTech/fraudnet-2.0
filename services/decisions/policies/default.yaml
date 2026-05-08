@@ -1,0 +1,82 @@
+# FraudNet 2.0 — default decision policy.
+# Reviewable without code changes (CLAUDE.md §5.4).
+
+id: default
+version: "2026-05-08-1"
+
+rules:
+  # ---- Tier 1: inline ----
+  - id: voice-velocity-burst-tier1
+    match:
+      signal_kind: voice.velocity_burst
+      severity_in: [critical, high]
+    action: volte.tag_suspected_spam
+    tier: tier1
+    suppression_window_s: 21600   # 6h
+
+  - id: sms-known-bad-body-tier1
+    match:
+      signal_kind: sms.known_bad_body
+    action: sms.block
+    tier: tier1
+    suppression_window_s: 86400
+
+  - id: sms-malicious-url-tier1
+    match:
+      signal_kind: sms.malicious_url
+      severity_in: [critical, high]
+    action: url.block
+    tier: tier1
+    suppression_window_s: 21600
+
+  - id: momo-mule-friction-tier1
+    match:
+      signal_kind: momo.mule_velocity
+      severity_in: [critical, high]
+    action: momo.send_with_care
+    tier: tier1
+    suppression_window_s: 3600
+
+  # ---- Tier 1: motif (the moat) ----
+  - id: voice-sms-momo-24h-motif-tier1
+    match:
+      motif: voice_sms_momo_24h
+      score_gte: 0.7
+    action: investigation.escalate
+    tier: tier1
+    suppression_window_s: 3600
+
+  # ---- Tier 2: near-real-time ----
+  - id: sms-template-smishing-tier2
+    match:
+      signal_kind: sms.template_smishing
+    action: customer.alert_smishing
+    tier: tier2
+    suppression_window_s: 21600
+
+  - id: device-imei-churn-tier2
+    match:
+      signal_kind: device.imei_churn
+    action: customer.do_i_know_you_prompt
+    tier: tier2
+    suppression_window_s: 86400
+
+  - id: momo-high-value-velocity-tier2
+    match:
+      signal_kind: momo.high_value_velocity
+    action: momo.review_limit
+    tier: tier2
+    suppression_window_s: 14400
+
+  - id: sms-known-bad-template-tier2
+    match:
+      signal_kind: sms.known_bad_template
+    action: customer.alert_smishing
+    tier: tier2
+    suppression_window_s: 21600
+
+# Anything unmatched lands in the NOC investigation queue.
+default:
+  action: investigation.queue
+  tier: tier3
+  suppression_window_s: 0
